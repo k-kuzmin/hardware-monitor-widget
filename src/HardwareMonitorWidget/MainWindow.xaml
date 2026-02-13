@@ -5,59 +5,193 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Hardware Monitor Widget"
-        Height="420"
-        Width="560"
-        MinHeight="360"
-        MinWidth="500"
+        Width="426"
+        SizeToContent="Height"
+        Background="Transparent"
+        Foreground="#8DE7FF"
+        AllowsTransparency="True"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
         WindowStartupLocation="CenterScreen">
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <Window.Resources>
+        <LinearGradientBrush x:Key="WindowGradient" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#040714" Offset="0" />
+            <GradientStop Color="#070D25" Offset="0.55" />
+            <GradientStop Color="#030611" Offset="1" />
+        </LinearGradientBrush>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,8">
-            <TextBlock Text="Hardware Monitor" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="{Binding GpuDisplayName}" Opacity="0.8" />
-            <TextBlock Text="{Binding StartupStatus}" Opacity="0.7" FontSize="12" />
-        </StackPanel>
+        <SolidColorBrush x:Key="PanelBrush" Color="#0A1332" />
+        <SolidColorBrush x:Key="MetricPanelBrush" Color="#0C173A" />
+        <SolidColorBrush x:Key="EdgeBrush" Color="#104A85" />
+        <SolidColorBrush x:Key="NeonBrush" Color="#00D8FF" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#66A6BE" />
+        <LinearGradientBrush x:Key="BarGradientBrush" StartPoint="0,0.5" EndPoint="1,0.5">
+            <GradientStop Color="#1EFF66" Offset="0" />
+            <GradientStop Color="#A6F02A" Offset="0.45" />
+            <GradientStop Color="#FF9A2F" Offset="0.72" />
+            <GradientStop Color="#FF2E4F" Offset="1" />
+        </LinearGradientBrush>
 
-        <ScrollViewer Grid.Row="1" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <ItemsControl ItemsSource="{Binding Metrics}">
+        <Style TargetType="TextBlock" x:Key="HeaderTitleStyle">
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="Foreground" Value="{StaticResource NeonBrush}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+
+        <Style TargetType="TextBlock" x:Key="MutedInfoStyle">
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="10" />
+        </Style>
+
+        <Style TargetType="ProgressBar" x:Key="CyberProgressBarStyle">
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Height" Value="8" />
+            <Setter Property="Background" Value="#0A132B" />
+            <Setter Property="BorderBrush" Value="#193A63" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid>
+                            <Border
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="2" />
+                            <Grid Margin="1" ClipToBounds="True">
+                                <Border x:Name="PART_Track" Background="Transparent" CornerRadius="2" />
+                                <Border x:Name="PART_Indicator"
+                                        HorizontalAlignment="Left"
+                                        Background="{TemplateBinding Foreground}"
+                                        CornerRadius="2">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="10"
+                                                          ShadowDepth="0"
+                                                          Opacity="0.6"
+                                                          Color="#65FFB9" />
+                                    </Border.Effect>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Margin="5"
+            Background="{StaticResource WindowGradient}"
+            BorderBrush="{StaticResource EdgeBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            MouseLeftButtonDown="OnRootMouseLeftButtonDown">
+        <Grid Margin="7">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="0,0,0,3">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource HeaderTitleStyle}" Text="■ SYSTEM MONITOR" />
+                    <Border CornerRadius="5"
+                            BorderBrush="#275B8E"
+                            BorderThickness="1"
+                            Padding="5,1"
+                            Margin="8,0,0,0"
+                            Background="{StaticResource PanelBrush}">
+                        <TextBlock Style="{StaticResource MutedInfoStyle}"
+                                   Text="{Binding StartupStatus}"
+                                   Foreground="#73CFF0"
+                                   MaxWidth="170"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding StartupStatusDetails}" />
+                    </Border>
+                </StackPanel>
+
+                <TextBlock Grid.Row="1"
+                           Style="{StaticResource MutedInfoStyle}"
+                           Text="{Binding GpuDisplayName}"
+                           Margin="0,1,0,0"
+                           VerticalAlignment="Center" />
+            </Grid>
+
+            <ItemsControl Grid.Row="1" ItemsSource="{Binding Metrics}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <StackPanel />
+                        <WrapPanel Orientation="Horizontal"
+                                   ItemWidth="200"
+                                   HorizontalAlignment="Left" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border Margin="0,0,0,10" Padding="10" BorderThickness="1" CornerRadius="8">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
+                        <Grid Width="200" Margin="0,1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="6" />
+                            </Grid.ColumnDefinitions>
 
-                                <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
-                                <TextBlock Grid.Column="1" Text="{Binding DisplayValue}" FontWeight="SemiBold" Margin="12,0,0,0" />
+                            <TextBlock Text="{Binding Label}"
+                                       FontFamily="Consolas"
+                                       FontSize="9"
+                                       Foreground="#7CC4DD"
+                                       Margin="0,0,6,0"
+                                       VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="2"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Right">
+                                <TextBlock Text="{Binding Value, StringFormat={}{0:0}}"
+                                           FontFamily="Consolas"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding BarBrush}" />
+                                <TextBlock Text="{Binding Unit}"
+                                           FontFamily="Consolas"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding BarBrush}"
+                                           Margin="2,0,0,0" />
+                            </StackPanel>
 
-                                <ProgressBar Grid.Row="1"
-                                             Grid.ColumnSpan="2"
-                                             Margin="0,8,0,0"
-                                             Height="16"
-                                             Minimum="0"
-                                             Maximum="100"
-                                             Value="{Binding Value}"
-                                             Foreground="{Binding BarBrush}" />
-                            </Grid>
-                        </Border>
+                            <ProgressBar Grid.Row="1"
+                                         Grid.ColumnSpan="4"
+                                         Margin="0,3,0,0"
+                                         Width="198"
+                                         HorizontalAlignment="Left"
+                                         Minimum="0"
+                                         Maximum="100"
+                                         Value="{Binding Value}"
+                                         Foreground="{Binding BarBrush}"
+                                         Style="{StaticResource CyberProgressBarStyle}" />
+
+                            <Border Grid.Row="2"
+                                    Grid.ColumnSpan="4"
+                                    Margin="0,3,0,0"
+                                    Height="1"
+                                    Background="#12335A"
+                                    Opacity="0.8" />
+                        </Grid>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
-        </ScrollViewer>
-    </Grid>
+        </Grid>
+    </Border>
 </Window>

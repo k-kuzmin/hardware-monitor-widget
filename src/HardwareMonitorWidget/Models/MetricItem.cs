@@ -17,7 +17,7 @@ public partial class MetricItem : ObservableObject
     [ObservableProperty]
     private Brush _barBrush = Brushes.LimeGreen;
 
-    public string DisplayValue => $"{Value:0.#} {Unit}";
+    public string DisplayValue => $"{Value:0} {Unit}";
 
     public MetricItem(string label, string unit)
     {

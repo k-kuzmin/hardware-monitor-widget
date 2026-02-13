@@ -1,4 +1,5 @@
 ﻿using System.Windows;
+using System.Windows.Input;
 using HardwareMonitorWidget.Services;
 using HardwareMonitorWidget.ViewModels;
 
@@ -32,5 +33,13 @@ public partial class MainWindow : Window
         Loaded -= OnLoaded;
         Closed -= OnClosed;
         await _viewModel.DisposeAsync();
+    }
+
+    private void OnRootMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
     }
 }

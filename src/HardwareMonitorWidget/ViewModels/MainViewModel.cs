@@ -31,7 +31,10 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
     private string _gpuDisplayName = "GPU: поиск...";
 
     [ObservableProperty]
-    private string _startupStatus = "Автозапуск: регистрация...";
+    private string _startupStatus = "Автозапуск: настройка";
+
+    [ObservableProperty]
+    private string _startupStatusDetails = "Инициализация автозапуска...";
 
     public MainViewModel(IHardwareMonitorService hardwareMonitorService, IStartupRegistrationService startupRegistrationService)
     {
@@ -42,9 +45,9 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             new("CPU Load", "%"),
             new("CPU Temp", "°C"),
-            new("RAM Load", "%"),
             new("GPU Load", "%"),
-            new("GPU Temp", "°C")
+            new("GPU Temp", "°C"),
+            new("RAM Load", "%")
         };
 
         _currentValues = new double[Metrics.Count];
@@ -109,9 +112,9 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             SetNewTarget(0, snapshot.CpuLoad);
             SetNewTarget(1, snapshot.CpuTemperature);
-            SetNewTarget(2, snapshot.RamLoad);
-            SetNewTarget(3, snapshot.GpuLoad);
-            SetNewTarget(4, snapshot.GpuTemperature);
+            SetNewTarget(2, snapshot.GpuLoad);
+            SetNewTarget(3, snapshot.GpuTemperature);
+            SetNewTarget(4, snapshot.RamLoad);
 
             GpuDisplayName = $"GPU: {snapshot.GpuName}";
         });
@@ -143,16 +146,45 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             _currentValues[index] = _startValues[index] + ((_targetValues[index] - _startValues[index]) * t);
             Metrics[index].Value = _currentValues[index];
-            Metrics[index].BarBrush = new SolidColorBrush(GetGradientColor(_currentValues[index]));
+            Metrics[index].BarBrush = CreateProgressiveBarBrush(_currentValues[index]);
         }
     }
 
-    private static Color GetGradientColor(double value)
+    private static Brush CreateProgressiveBarBrush(double value)
     {
         var normalized = Math.Clamp(value / 100d, 0d, 1d);
-        var red = (byte)(255 * normalized);
-        var green = (byte)(255 * (1 - normalized));
-        return Color.FromRgb(red, green, 40);
+
+        var green = Color.FromRgb(30, 255, 102);
+        var lime = Color.FromRgb(166, 240, 42);
+        var yellow = Color.FromRgb(255, 200, 70);
+        var red = Color.FromRgb(255, 46, 79);
+
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0.5),
+            EndPoint = new Point(1, 0.5)
+        };
+
+        if (normalized < 0.45)
+        {
+            brush.GradientStops.Add(new GradientStop(green, 0));
+            brush.GradientStops.Add(new GradientStop(lime, 1));
+        }
+        else if (normalized < 0.8)
+        {
+            brush.GradientStops.Add(new GradientStop(green, 0));
+            brush.GradientStops.Add(new GradientStop(lime, 0.6));
+            brush.GradientStops.Add(new GradientStop(yellow, 1));
+        }
+        else
+        {
+            brush.GradientStops.Add(new GradientStop(green, 0));
+            brush.GradientStops.Add(new GradientStop(lime, 0.45));
+            brush.GradientStops.Add(new GradientStop(yellow, 0.72));
+            brush.GradientStops.Add(new GradientStop(red, 1));
+        }
+
+        return brush;
     }
 
     private async Task RegisterAutostartAsync()
@@ -160,20 +192,29 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         var executablePath = Process.GetCurrentProcess().MainModule?.FileName;
         if (string.IsNullOrWhiteSpace(executablePath))
         {
-            StartupStatus = "Автозапуск: путь к приложению не найден";
+            StartupStatus = "Автозапуск: нет пути";
+            StartupStatusDetails = "Не найден путь к исполняемому файлу приложения.";
             return;
         }
 
         try
         {
             var registered = await _startupRegistrationService.EnsureMachineWideAutostartAsync(executablePath);
-            StartupStatus = registered
-                ? "Автозапуск: задача Task Scheduler настроена"
-                : "Автозапуск: не удалось настроить (попробуйте запуск от администратора)";
+            if (registered)
+            {
+                StartupStatus = "Автозапуск: включен";
+                StartupStatusDetails = "Task Scheduler: задача автозапуска успешно настроена.";
+            }
+            else
+            {
+                StartupStatus = "Автозапуск: нет прав";
+                StartupStatusDetails = "Не удалось настроить автозапуск. Попробуйте запустить приложение от администратора.";
+            }
         }
         catch
         {
-            StartupStatus = "Автозапуск: ошибка регистрации";
+            StartupStatus = "Автозапуск: ошибка";
+            StartupStatusDetails = "Произошла ошибка при регистрации автозапуска.";
         }
     }
 }
