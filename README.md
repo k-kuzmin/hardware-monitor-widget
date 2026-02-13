@@ -48,18 +48,6 @@ dotnet run --project src/HardwareMonitorWidget/HardwareMonitorWidget.csproj
 
 ## Если Windows Defender блокирует запуск (`0x800700E1`)
 
-Выполните в PowerShell от имени администратора:
+Рекомендуется использовать подписанный релизный `.exe` и избегать широких исключений Defender для папок/процессов.
 
-```powershell
-Add-MpPreference -ExclusionPath "D:\Portfolio\Projects\hardware-monitor-widget"
-Add-MpPreference -ExclusionProcess "dotnet.exe"
-Add-MpPreference -ExclusionProcess "rider64.exe"
-```
-
-## Проверка исключений Defender
-
-```powershell
-$mp = Get-MpPreference
-$mp.ExclusionPath | Where-Object { $_ -eq "D:\Portfolio\Projects\hardware-monitor-widget" }
-$mp.ExclusionProcess | Where-Object { $_ -match "dotnet\.exe|rider64\.exe" }
-```
+Если исключение необходимо, добавляйте только конкретный итоговый бинарник приложения (а не `dotnet.exe` или IDE-процессы).

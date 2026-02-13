@@ -12,6 +12,8 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan AnimationDuration = TimeSpan.FromMilliseconds(700);
+    private static readonly Brush[] BarBrushPalette = CreateBarBrushPalette();
+    private static readonly Brush[] TextBrushPalette = CreateTextBrushPalette();
 
     private readonly IHardwareMonitorService _hardwareMonitorService;
     private readonly IStartupRegistrationService _startupRegistrationService;
@@ -110,11 +112,7 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         await Application.Current.Dispatcher.InvokeAsync(() =>
         {
-            SetNewTarget(0, snapshot.CpuLoad);
-            SetNewTarget(1, snapshot.CpuTemperature);
-            SetNewTarget(2, snapshot.GpuLoad);
-            SetNewTarget(3, snapshot.GpuTemperature);
-            SetNewTarget(4, snapshot.RamLoad);
+            SetTargetsFromSnapshot(snapshot);
 
             GpuDisplayName = $"GPU: {snapshot.GpuName}";
         });
@@ -122,7 +120,7 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task AnimationLoopAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(40));
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
 
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
@@ -130,11 +128,21 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private void SetTargetsFromSnapshot(HardwareSnapshot snapshot)
+    {
+        _animationStartUtc = DateTime.UtcNow;
+
+        SetNewTarget(0, snapshot.CpuLoad);
+        SetNewTarget(1, snapshot.CpuTemperature);
+        SetNewTarget(2, snapshot.GpuLoad);
+        SetNewTarget(3, snapshot.GpuTemperature);
+        SetNewTarget(4, snapshot.RamLoad);
+    }
+
     private void SetNewTarget(int index, double newTarget)
     {
         _startValues[index] = _currentValues[index];
         _targetValues[index] = Math.Clamp(newTarget, 0, 100);
-        _animationStartUtc = DateTime.UtcNow;
     }
 
     private void ApplyInterpolatedValues(DateTime nowUtc)
@@ -146,8 +154,95 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             _currentValues[index] = _startValues[index] + ((_targetValues[index] - _startValues[index]) * t);
             Metrics[index].Value = _currentValues[index];
-            Metrics[index].BarBrush = CreateProgressiveBarBrush(_currentValues[index]);
+
+            var brush = GetBarBrush(_currentValues[index]);
+            if (!ReferenceEquals(Metrics[index].BarBrush, brush))
+            {
+                Metrics[index].BarBrush = brush;
+            }
+
+            var textBrush = GetTextBrush(_currentValues[index]);
+            if (!ReferenceEquals(Metrics[index].TextBrush, textBrush))
+            {
+                Metrics[index].TextBrush = textBrush;
+            }
         }
+    }
+
+    private static Brush GetBarBrush(double value)
+    {
+        var paletteIndex = (int)Math.Round(Math.Clamp(value, 0d, 100d), MidpointRounding.AwayFromZero);
+        return BarBrushPalette[paletteIndex];
+    }
+
+    private static Brush GetTextBrush(double value)
+    {
+        var paletteIndex = (int)Math.Round(Math.Clamp(value, 0d, 100d), MidpointRounding.AwayFromZero);
+        return TextBrushPalette[paletteIndex];
+    }
+
+    private static Brush[] CreateBarBrushPalette()
+    {
+        var palette = new Brush[101];
+
+        for (var i = 0; i <= 100; i++)
+        {
+            palette[i] = CreateProgressiveBarBrush(i);
+        }
+
+        return palette;
+    }
+
+    private static Brush[] CreateTextBrushPalette()
+    {
+        var palette = new Brush[101];
+
+        for (var i = 0; i <= 100; i++)
+        {
+            var color = CreateProgressiveTextColor(i);
+            var brush = new SolidColorBrush(color);
+            brush.Freeze();
+            palette[i] = brush;
+        }
+
+        return palette;
+    }
+
+    private static Color CreateProgressiveTextColor(double value)
+    {
+        var normalized = Math.Clamp(value / 100d, 0d, 1d);
+
+        var green = Color.FromRgb(30, 255, 102);
+        var lime = Color.FromRgb(166, 240, 42);
+        var yellow = Color.FromRgb(255, 200, 70);
+        var red = Color.FromRgb(255, 46, 79);
+
+        if (normalized < 0.45)
+        {
+            return LerpColor(green, lime, normalized / 0.45);
+        }
+
+        if (normalized < 0.8)
+        {
+            return LerpColor(lime, yellow, (normalized - 0.45) / 0.35);
+        }
+
+        return LerpColor(yellow, red, (normalized - 0.8) / 0.2);
+    }
+
+    private static Color LerpColor(Color start, Color end, double t)
+    {
+        var clampedT = Math.Clamp(t, 0d, 1d);
+
+        byte Interpolate(byte left, byte right)
+        {
+            return (byte)Math.Round(left + ((right - left) * clampedT), MidpointRounding.AwayFromZero);
+        }
+
+        return Color.FromRgb(
+            Interpolate(start.R, end.R),
+            Interpolate(start.G, end.G),
+            Interpolate(start.B, end.B));
     }
 
     private static Brush CreateProgressiveBarBrush(double value)
@@ -184,6 +279,7 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
             brush.GradientStops.Add(new GradientStop(red, 1));
         }
 
+        brush.Freeze();
         return brush;
     }
 
