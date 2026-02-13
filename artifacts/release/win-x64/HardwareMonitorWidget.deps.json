@@ -10,7 +10,8 @@
       "HardwareMonitorWidget/1.0.0": {
         "dependencies": {
           "CommunityToolkit.Mvvm": "8.4.0",
-          "LibreHardwareMonitorLib": "0.9.5"
+          "LibreHardwareMonitorLib": "0.9.5",
+          "System.Management": "10.0.1"
         },
         "runtime": {
           "HardwareMonitorWidget.dll": {}
