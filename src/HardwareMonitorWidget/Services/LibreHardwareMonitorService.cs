@@ -34,10 +34,10 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
         var selectedGpu = SelectGpu(gpuCandidates);
 
         var cpuLoad = GetCpuLoad(cpu);
-        var cpuTemperature = GetCpuTemperature(cpu);
+        var cpuTemperature = GetCpuTemperature(cpu, allHardware);
         var ramLoad = GetRamLoad(memory);
         var gpuLoad = GetGpuLoad(selectedGpu);
-        var gpuTemperature = GetGpuTemperature(selectedGpu);
+        var gpuTemperature = GetGpuTemperature(selectedGpu, allHardware);
 
         return new HardwareSnapshot(
             CpuLoad: ClampToPercent(cpuLoad),
@@ -140,18 +140,33 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
             ?? 0;
     }
 
-    private static double GetCpuTemperature(IHardware? cpu)
+    private static double GetCpuTemperature(IHardware? cpu, IReadOnlyList<IHardware> allHardware)
     {
-        if (cpu is null)
+        var directCpuTemperature = cpu is null
+            ? 0
+            : GetPreferredSensorValue(
+                cpu,
+                SensorType.Temperature,
+                sensor => sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                       || sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                       || sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                       || sensor.Name.Contains("Core Max", StringComparison.OrdinalIgnoreCase))
+            ?? GetMaxSensorValue(cpu, SensorType.Temperature)
+            ?? 0;
+
+        if (directCpuTemperature > 0)
         {
-            return 0;
+            return directCpuTemperature;
         }
 
         return GetPreferredSensorValue(
-            cpu,
+            allHardware,
             SensorType.Temperature,
-            sensor => sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase))
-            ?? GetMaxSensorValue(cpu, SensorType.Temperature)
+            sensor => sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                   || sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase))
+            ?? GetMaxSensorValue(allHardware, SensorType.Temperature)
             ?? 0;
     }
 
@@ -187,19 +202,31 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
             ?? 0;
     }
 
-    private static double GetGpuTemperature(IHardware? gpu)
+    private static double GetGpuTemperature(IHardware? gpu, IReadOnlyList<IHardware> allHardware)
     {
-        if (gpu is null)
+        var directGpuTemperature = gpu is null
+            ? 0
+            : GetPreferredSensorValue(
+                gpu,
+                SensorType.Temperature,
+                sensor => sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                       || sensor.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
+                       || sensor.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase))
+            ?? GetMaxSensorValue(gpu, SensorType.Temperature)
+            ?? 0;
+
+        if (directGpuTemperature > 0)
         {
-            return 0;
+            return directGpuTemperature;
         }
 
         return GetPreferredSensorValue(
-            gpu,
+            allHardware,
             SensorType.Temperature,
             sensor => sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase))
-            ?? GetMaxSensorValue(gpu, SensorType.Temperature)
+                   || sensor.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
+                   || sensor.Name.Contains("GPU", StringComparison.OrdinalIgnoreCase))
+            ?? GetMaxSensorValue(allHardware, SensorType.Temperature)
             ?? 0;
     }
 
@@ -212,9 +239,31 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
             .FirstOrDefault(value => value.HasValue);
     }
 
+    private static double? GetPreferredSensorValue(IEnumerable<IHardware> hardwareCollection, SensorType sensorType, Func<ISensor, bool> predicate)
+    {
+        return hardwareCollection
+            .SelectMany(EnumerateSensors)
+            .Where(sensor => sensor.SensorType == sensorType)
+            .Where(predicate)
+            .Select(sensor => (double?)sensor.Value)
+            .FirstOrDefault(value => value.HasValue);
+    }
+
     private static double? GetMaxSensorValue(IHardware hardware, SensorType sensorType)
     {
         return EnumerateSensors(hardware)
+            .Where(sensor => sensor.SensorType == sensorType)
+            .Select(sensor => (double?)sensor.Value)
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .DefaultIfEmpty()
+            .Max();
+    }
+
+    private static double? GetMaxSensorValue(IEnumerable<IHardware> hardwareCollection, SensorType sensorType)
+    {
+        return hardwareCollection
+            .SelectMany(EnumerateSensors)
             .Where(sensor => sensor.SensorType == sensorType)
             .Select(sensor => (double?)sensor.Value)
             .Where(value => value.HasValue)
