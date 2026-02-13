@@ -28,6 +28,28 @@ dotnet build HardwareMonitorWidget.sln
 dotnet run --project src/HardwareMonitorWidget/HardwareMonitorWidget.csproj
 ```
 
+### Если Windows Defender блокирует запуск (`0x800700E1`)
+
+Выполните в PowerShell от имени администратора:
+
+```powershell
+Add-MpPreference -ExclusionPath "D:\Portfolio\Projects\hardware-monitor-widget"
+Add-MpPreference -ExclusionProcess "dotnet.exe"
+Add-MpPreference -ExclusionProcess "rider64.exe"
+```
+
+После этого повторите команды из раздела «Запуск».
+
+### Проверка, что исключения применились
+
+```powershell
+$mp = Get-MpPreference
+$mp.ExclusionPath | Where-Object { $_ -eq "D:\Portfolio\Projects\hardware-monitor-widget" }
+$mp.ExclusionProcess | Where-Object { $_ -match "dotnet\.exe|rider64\.exe" }
+```
+
+Если команды вернули путь проекта и оба процесса, исключения применены.
+
 ## Автозапуск
 
 Приложение пытается зарегистрировать machine-wide задачу в Task Scheduler при запуске:
