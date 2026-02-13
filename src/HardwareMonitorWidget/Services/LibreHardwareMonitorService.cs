@@ -1,11 +1,17 @@
 using HardwareMonitorWidget.Models;
 using LibreHardwareMonitor.Hardware;
+using System.Management;
 
 namespace HardwareMonitorWidget.Services;
 
 public sealed class LibreHardwareMonitorService : IHardwareMonitorService
 {
     private readonly Computer _computer;
+    private static readonly TimeSpan WmiCpuTemperatureCacheDuration = TimeSpan.FromSeconds(3);
+
+    private double _cachedWmiCpuTemperature;
+    private DateTime _lastWmiCpuTemperatureReadUtc = DateTime.MinValue;
+    private bool _openHardwareMonitorWmiNamespaceUnavailable;
 
     public LibreHardwareMonitorService()
     {
@@ -13,7 +19,8 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
         {
             IsCpuEnabled = true,
             IsMemoryEnabled = true,
-            IsGpuEnabled = true
+            IsGpuEnabled = true,
+            IsMotherboardEnabled = true  // Включаем мониторинг материнской платы для ASUS сенсоров
         };
 
         _computer.Open();
@@ -29,6 +36,7 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
 
         var cpu = allHardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
         var memory = allHardware.FirstOrDefault(h => h.HardwareType == HardwareType.Memory);
+        var motherboard = allHardware.FirstOrDefault(h => h.HardwareType == HardwareType.Motherboard);
 
         var gpuCandidates = allHardware
             .Where(IsGpu)
@@ -37,11 +45,12 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
         var selectedGpu = SelectGpu(gpuCandidates, sensorMap);
 
         var cpuSensors = GetSensors(cpu, sensorMap);
+        var motherboardSensors = GetSensors(motherboard, sensorMap);
         var memorySensors = GetSensors(memory, sensorMap);
         var gpuSensors = GetSensors(selectedGpu, sensorMap);
 
         var cpuLoad = GetCpuLoad(cpuSensors);
-        var cpuTemperature = GetCpuTemperature(cpuSensors, allSensors);
+        var cpuTemperature = GetCpuTemperature(cpuSensors, motherboardSensors, allSensors);
         var ramLoad = GetRamLoad(memorySensors);
         var gpuLoad = GetGpuLoad(gpuSensors);
         var gpuTemperature = GetGpuTemperature(gpuSensors, allSensors);
@@ -164,32 +173,145 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
             ?? 0;
     }
 
-    private static double GetCpuTemperature(IEnumerable<ISensor> cpuSensors, IEnumerable<ISensor> allSensors)
+    private double GetCpuTemperature(IEnumerable<ISensor> cpuSensors, IEnumerable<ISensor> motherboardSensors, IEnumerable<ISensor> allSensors)
     {
-        var directCpuTemperature = GetPreferredSensorValue(
-                cpuSensors,
-                SensorType.Temperature,
-                sensor => sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                       || sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                       || sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-                       || sensor.Name.Contains("Core Max", StringComparison.OrdinalIgnoreCase))
-            ?? GetMaxSensorValue(cpuSensors, SensorType.Temperature)
-            ?? 0;
+        // Приоритет 1: Ищем максимальную температуру ядер CPU (Core #1, Core #2, etc.) или Package
+        // Это наиболее точное значение, которое чаще всего совпадает с системами мониторинга ASUS
+        var coreTemperatures = cpuSensors
+            .Where(s => s.SensorType == SensorType.Temperature)
+            .Where(s => s.Name.Contains("Core", StringComparison.OrdinalIgnoreCase) 
+                     || s.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                     || s.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                     || s.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                     || s.Name.Contains("CCD", StringComparison.OrdinalIgnoreCase))  // AMD Ryzen CCD температура
+            .Select(s => s.Value)
+            .Where(v => v.HasValue)
+            .Select(v => (double)v!.Value)
+            .ToList();
 
-        if (directCpuTemperature > 0)
+        if (coreTemperatures.Any())
         {
-            return directCpuTemperature;
+            // Возвращаем максимальную температуру среди всех ядер
+            return coreTemperatures.Max();
         }
 
-        return GetPreferredSensorValue(
+        // Приоритет 2: Проверяем сенсоры материнской платы (часто используется ASUS)
+        var motherboardCpuTemp = GetPreferredSensorValue(
+            motherboardSensors,
+            SensorType.Temperature,
+            sensor => sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || sensor.Name.Contains("Processor", StringComparison.OrdinalIgnoreCase)
+                   || sensor.Name.Contains("CPUTIN", StringComparison.OrdinalIgnoreCase));
+
+        if (motherboardCpuTemp.HasValue && motherboardCpuTemp.Value > 0)
+        {
+            return motherboardCpuTemp.Value;
+        }
+
+        // Приоритет 3: Любые другие температурные сенсоры CPU
+        var anyCpuTemp = GetMaxSensorValue(cpuSensors, SensorType.Temperature);
+        if (anyCpuTemp.HasValue && anyCpuTemp.Value > 0)
+        {
+            return anyCpuTemp.Value;
+        }
+
+        // Приоритет 4: Ищем по всем доступным сенсорам
+        var allSensorsTemp = GetPreferredSensorValue(
             allSensors,
             SensorType.Temperature,
             sensor => sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
                    || sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
                    || sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase))
-            ?? GetMaxSensorValue(allSensors, SensorType.Temperature)
-            ?? 0;
+                   || sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase));
+        
+        if (allSensorsTemp.HasValue && allSensorsTemp.Value > 0)
+        {
+            return allSensorsTemp.Value;
+        }
+
+        // Приоритет 5: Fallback на WMI (Windows Management Instrumentation)
+        var wmiTemp = GetCpuTemperatureFromWmiCached();
+        if (wmiTemp > 0)
+        {
+            return wmiTemp;
+        }
+
+        return 0;
+    }
+
+    private double GetCpuTemperatureFromWmiCached()
+    {
+        var nowUtc = DateTime.UtcNow;
+        if ((nowUtc - _lastWmiCpuTemperatureReadUtc) < WmiCpuTemperatureCacheDuration)
+        {
+            return _cachedWmiCpuTemperature;
+        }
+
+        _cachedWmiCpuTemperature = TryGetCpuTemperatureFromWmi();
+        _lastWmiCpuTemperatureReadUtc = nowUtc;
+
+        return _cachedWmiCpuTemperature;
+    }
+
+    private double TryGetCpuTemperatureFromWmi()
+    {
+        double maxTemp = 0;
+        
+        try
+        {
+            // Пробуем получить температуру через WMI (работает на некоторых системах)
+            using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT * FROM MSAcpi_ThermalZoneTemperature");
+            foreach (var obj in searcher.Get())
+            {
+                var temp = obj["CurrentTemperature"];
+                if (temp != null)
+                {
+                    // WMI возвращает температуру в десятых долях Кельвина
+                    var kelvin = Convert.ToDouble(temp) / 10.0;
+                    var celsius = kelvin - 273.15;
+                    
+                    // Проверяем, что значение разумное (между 0 и 120°C)
+                    if (celsius > 0 && celsius < 120)
+                    {
+                        maxTemp = Math.Max(maxTemp, celsius);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // WMI может не поддерживаться или требовать прав администратора
+        }
+
+        if (!_openHardwareMonitorWmiNamespaceUnavailable)
+        {
+            try
+            {
+                // Альтернативный способ через Open Hardware Monitor WMI
+                using var searcher = new ManagementObjectSearcher(@"root\OpenHardwareMonitor", 
+                    "SELECT * FROM Sensor WHERE SensorType='Temperature' AND Name LIKE '%CPU%'");
+
+                foreach (var obj in searcher.Get())
+                {
+                    var value = obj["Value"];
+                    if (value != null)
+                    {
+                        var temp = Convert.ToDouble(value);
+                        if (temp > 0 && temp < 120)
+                        {
+                            maxTemp = Math.Max(maxTemp, temp);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Если namespace/провайдер недоступен, больше не пытаемся каждый опрос.
+                _openHardwareMonitorWmiNamespaceUnavailable = true;
+            }
+        }
+
+        return maxTemp;
     }
 
     private static double GetRamLoad(IEnumerable<ISensor> memorySensors)
