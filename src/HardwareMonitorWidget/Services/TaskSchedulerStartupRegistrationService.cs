@@ -20,7 +20,7 @@ public sealed class TaskSchedulerStartupRegistrationService : IStartupRegistrati
             return false;
         }
 
-        var arguments = $"/Create /TN \"{TaskName}\" /TR \"\\\"{executablePath}\\\"\" /SC ONLOGON /RL LIMITED /RU Users /F";
+        var arguments = $"/Create /TN \"{TaskName}\" /TR \"\\\"{executablePath}\\\"\" /SC ONLOGON /RL HIGHEST /F";
 
         var startInfo = new ProcessStartInfo
         {

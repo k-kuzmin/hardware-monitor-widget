@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"bcdedit | Select-String ''testsigning''\")",
+      "Bash(powershell -Command:*)",
+      "Bash(dotnet build:*)",
+      "Bash(start \"\" dotnet run --project src/HardwareMonitorWidget/HardwareMonitorWidget.csproj)",
+      "Bash(Start-Process \"d:/Portfolio/Projects/hardware-monitor-widget/src/HardwareMonitorWidget/bin/Debug/net8.0-windows/HardwareMonitorWidget.exe\")",
+      "Bash(dotnet publish:*)"
+    ]
+  }
+}

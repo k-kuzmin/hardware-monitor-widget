@@ -38,6 +38,9 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     private string _startupStatusDetails = "Инициализация автозапуска...";
 
+    [ObservableProperty]
+    private Visibility _startupStatusVisible = Visibility.Collapsed;
+
     public MainViewModel(IHardwareMonitorService hardwareMonitorService, IStartupRegistrationService startupRegistrationService)
     {
         _hardwareMonitorService = hardwareMonitorService;
@@ -290,6 +293,7 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             StartupStatus = "Автозапуск: нет пути";
             StartupStatusDetails = "Не найден путь к исполняемому файлу приложения.";
+            StartupStatusVisible = Visibility.Visible;
             return;
         }
 
@@ -298,19 +302,21 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
             var registered = await _startupRegistrationService.EnsureMachineWideAutostartAsync(executablePath);
             if (registered)
             {
-                StartupStatus = "Автозапуск: включен";
-                StartupStatusDetails = "Task Scheduler: задача автозапуска успешно настроена.";
+                // Успех - скрываем статус
+                StartupStatusVisible = Visibility.Collapsed;
             }
             else
             {
                 StartupStatus = "Автозапуск: нет прав";
                 StartupStatusDetails = "Не удалось настроить автозапуск. Попробуйте запустить приложение от администратора.";
+                StartupStatusVisible = Visibility.Visible;
             }
         }
         catch
         {
             StartupStatus = "Автозапуск: ошибка";
             StartupStatusDetails = "Произошла ошибка при регистрации автозапуска.";
+            StartupStatusVisible = Visibility.Visible;
         }
     }
 }

@@ -1,66 +1,57 @@
 using HardwareMonitorWidget.Models;
 using LibreHardwareMonitor.Hardware;
 using System.Management;
+using System.Runtime.InteropServices;
 
 namespace HardwareMonitorWidget.Services;
 
 public sealed class LibreHardwareMonitorService : IHardwareMonitorService
 {
-    private readonly Computer _computer;
-    private static readonly TimeSpan WmiCpuTemperatureCacheDuration = TimeSpan.FromSeconds(3);
+    private Computer _computer;
 
-    private double _cachedWmiCpuTemperature;
-    private DateTime _lastWmiCpuTemperatureReadUtc = DateTime.MinValue;
-    private bool _openHardwareMonitorWmiNamespaceUnavailable;
+    /// <summary>
+    /// Периодическая реинициализация Computer предотвращает "залипание" сенсоров температуры,
+    /// которое происходит когда LibreHardwareMonitor теряет связь с драйвером (после сна, гибернации и т.д.).
+    /// </summary>
+    private int _pollsSinceReinit;
+    private const int ReinitEveryNPolls = 30; // каждые ~30 секунд
+
 
     public LibreHardwareMonitorService()
     {
-        _computer = new Computer
-        {
-            IsCpuEnabled = true,
-            IsMemoryEnabled = true,
-            IsGpuEnabled = true,
-            IsMotherboardEnabled = true  // Включаем мониторинг материнской платы для ASUS сенсоров
-        };
-
-        _computer.Open();
+        _computer = CreateComputer();
     }
 
     public HardwareSnapshot ReadSnapshot()
     {
+        _pollsSinceReinit++;
+        if (_pollsSinceReinit >= ReinitEveryNPolls)
+        {
+            _pollsSinceReinit = 0;
+            ReinitializeHardware();
+        }
+
         UpdateAllHardware();
 
         var allHardware = _computer.Hardware.ToList();
         var sensorMap = BuildSensorMap(allHardware);
-        var allSensors = sensorMap.Values.SelectMany(sensors => sensors).ToList();
+        var allSensors = sensorMap.Values.SelectMany(s => s).ToList();
 
         var cpu = allHardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
-        var memory = allHardware.FirstOrDefault(h => h.HardwareType == HardwareType.Memory);
         var motherboard = allHardware.FirstOrDefault(h => h.HardwareType == HardwareType.Motherboard);
-
-        var gpuCandidates = allHardware
-            .Where(IsGpu)
-            .ToList();
-
+        var gpuCandidates = allHardware.Where(IsGpu).ToList();
         var selectedGpu = SelectGpu(gpuCandidates, sensorMap);
 
         var cpuSensors = GetSensors(cpu, sensorMap);
         var motherboardSensors = GetSensors(motherboard, sensorMap);
-        var memorySensors = GetSensors(memory, sensorMap);
         var gpuSensors = GetSensors(selectedGpu, sensorMap);
 
-        var cpuLoad = GetCpuLoad(cpuSensors);
-        var cpuTemperature = GetCpuTemperature(cpuSensors, motherboardSensors, allSensors);
-        var ramLoad = GetRamLoad(memorySensors);
-        var gpuLoad = GetGpuLoad(gpuSensors);
-        var gpuTemperature = GetGpuTemperature(gpuSensors, allSensors);
-
         return new HardwareSnapshot(
-            CpuLoad: ClampToPercent(cpuLoad),
-            CpuTemperature: ClampToPercent(cpuTemperature),
-            RamLoad: ClampToPercent(ramLoad),
-            GpuLoad: ClampToPercent(gpuLoad),
-            GpuTemperature: ClampToPercent(gpuTemperature),
+            CpuLoad: ClampToPercent(GetCpuLoad(cpuSensors)),
+            CpuTemperature: ClampToPercent(GetCpuTemperature(cpuSensors, motherboardSensors, allSensors)),
+            RamLoad: ClampToPercent(GetPhysicalMemoryLoad()),
+            GpuLoad: ClampToPercent(GetGpuLoad(gpuSensors)),
+            GpuTemperature: ClampToPercent(GetGpuTemperature(gpuSensors, allSensors)),
             GpuName: selectedGpu?.Name ?? "GPU не обнаружен");
     }
 
@@ -69,57 +60,85 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
         _computer.Close();
     }
 
+    private static Computer CreateComputer()
+    {
+        var computer = new Computer
+        {
+            IsCpuEnabled = true,
+            IsMemoryEnabled = true,
+            IsGpuEnabled = true,
+            IsMotherboardEnabled = true
+        };
+
+        computer.Open();
+        return computer;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatusEx
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    /// <summary>
+    /// Читаем загрузку физической RAM напрямую через Win32 API — тот же источник, что и Диспетчер задач.
+    /// </summary>
+    private static double GetPhysicalMemoryLoad()
+    {
+        var memStatus = new MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>() };
+        return GlobalMemoryStatusEx(ref memStatus) ? memStatus.dwMemoryLoad : 0;
+    }
+
+    private void ReinitializeHardware()
+    {
+        try { _computer.Close(); } catch { }
+        _computer = CreateComputer();
+    }
+
     private void UpdateAllHardware()
     {
         foreach (var hardware in _computer.Hardware)
-        {
             UpdateHardwareRecursive(hardware);
-        }
     }
 
     private static void UpdateHardwareRecursive(IHardware hardware)
     {
         hardware.Update();
-
-        foreach (var subHardware in hardware.SubHardware)
-        {
-            UpdateHardwareRecursive(subHardware);
-        }
+        foreach (var sub in hardware.SubHardware)
+            UpdateHardwareRecursive(sub);
     }
 
-    private static bool IsGpu(IHardware hardware)
-    {
-        return hardware.HardwareType is HardwareType.GpuNvidia
-            or HardwareType.GpuAmd
-            or HardwareType.GpuIntel;
-    }
+    private static bool IsGpu(IHardware hardware) =>
+        hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
 
-    private static bool IsDiscreteGpu(IHardware hardware)
-    {
-        return hardware.HardwareType is HardwareType.GpuNvidia
-            or HardwareType.GpuAmd;
-    }
+    private static bool IsDiscreteGpu(IHardware hardware) =>
+        hardware.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd;
 
     private static IHardware? SelectGpu(IReadOnlyList<IHardware> gpus, IReadOnlyDictionary<IHardware, IReadOnlyList<ISensor>> sensorMap)
     {
-        if (gpus.Count == 0)
-        {
-            return null;
-        }
+        if (gpus.Count == 0) return null;
 
         var discrete = gpus.Where(IsDiscreteGpu).ToList();
-
         if (discrete.Count > 0)
         {
-            var activeDiscrete = discrete
-                .Select(gpu => new { Gpu = gpu, Load = GetGpuLoad(GetSensors(gpu, sensorMap)) })
-                .OrderByDescending(item => item.Load)
-                .FirstOrDefault(item => item.Load > 0.5)?.Gpu;
+            var active = discrete
+                .Select(g => new { Gpu = g, Load = GetGpuLoad(GetSensors(g, sensorMap)) })
+                .OrderByDescending(x => x.Load)
+                .FirstOrDefault(x => x.Load > 0.5)?.Gpu;
 
-            if (activeDiscrete is not null)
-            {
-                return activeDiscrete;
-            }
+            if (active is not null) return active;
         }
 
         return gpus[0];
@@ -127,263 +146,148 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
 
     private static IEnumerable<ISensor> EnumerateSensors(IHardware hardware)
     {
-        foreach (var sensor in hardware.Sensors)
-        {
-            yield return sensor;
-        }
-
-        foreach (var subHardware in hardware.SubHardware)
-        {
-            foreach (var sensor in EnumerateSensors(subHardware))
-            {
+        foreach (var sensor in hardware.Sensors) yield return sensor;
+        foreach (var sub in hardware.SubHardware)
+            foreach (var sensor in EnumerateSensors(sub))
                 yield return sensor;
-            }
-        }
     }
 
     private static Dictionary<IHardware, IReadOnlyList<ISensor>> BuildSensorMap(IEnumerable<IHardware> hardwareCollection)
     {
-        var sensorMap = new Dictionary<IHardware, IReadOnlyList<ISensor>>();
-
-        foreach (var hardware in hardwareCollection)
-        {
-            sensorMap[hardware] = EnumerateSensors(hardware).ToList();
-        }
-
-        return sensorMap;
+        var map = new Dictionary<IHardware, IReadOnlyList<ISensor>>();
+        foreach (var hw in hardwareCollection)
+            map[hw] = EnumerateSensors(hw).ToList();
+        return map;
     }
 
     private static IReadOnlyList<ISensor> GetSensors(IHardware? hardware, IReadOnlyDictionary<IHardware, IReadOnlyList<ISensor>> sensorMap)
     {
-        if (hardware is null)
-        {
-            return [];
-        }
-
+        if (hardware is null) return [];
         return sensorMap.TryGetValue(hardware, out var sensors) ? sensors : [];
     }
 
-    private static double GetCpuLoad(IEnumerable<ISensor> cpuSensors)
-    {
-        return GetPreferredSensorValue(
-            cpuSensors,
-            SensorType.Load,
-            sensor => sensor.Name.Contains("Total", StringComparison.OrdinalIgnoreCase))
-            ?? GetMaxSensorValue(cpuSensors, SensorType.Load)
-            ?? 0;
-    }
+    private static double GetCpuLoad(IEnumerable<ISensor> cpuSensors) =>
+        GetPreferredSensorValue(cpuSensors, SensorType.Load,
+            s => s.Name.Contains("Total", StringComparison.OrdinalIgnoreCase))
+        ?? GetMaxSensorValue(cpuSensors, SensorType.Load)
+        ?? 0;
 
-    private double GetCpuTemperature(IEnumerable<ISensor> cpuSensors, IEnumerable<ISensor> motherboardSensors, IEnumerable<ISensor> allSensors)
+    /// <summary>
+    /// Возвращает температуру CPU. Цепочка источников:
+    /// 1. LHM: ядра/Package/Tctl/Tdie/CCD
+    /// 2. LHM: сенсоры материнской платы (ASUS, CPUTIN)
+    /// 3. LHM: любые температурные сенсоры CPU
+    /// 4. LHM: глобальный поиск по всем сенсорам
+    /// 5. Win32_PerfFormattedData_Counters_ThermalZoneInformation (без прав администратора)
+    /// </summary>
+    private double GetCpuTemperature(
+        IEnumerable<ISensor> cpuSensors, IEnumerable<ISensor> motherboardSensors, IEnumerable<ISensor> allSensors)
     {
-        // Приоритет 1: Ищем максимальную температуру ядер CPU (Core #1, Core #2, etc.) или Package
-        // Это наиболее точное значение, которое чаще всего совпадает с системами мониторинга ASUS
-        var coreTemperatures = cpuSensors
-            .Where(s => s.SensorType == SensorType.Temperature)
-            .Where(s => s.Name.Contains("Core", StringComparison.OrdinalIgnoreCase) 
-                     || s.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                     || s.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                     || s.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-                     || s.Name.Contains("CCD", StringComparison.OrdinalIgnoreCase))  // AMD Ryzen CCD температура
+        // 1. Ядра / Package / Tctl / Tdie / CCD
+        var coreTemps = cpuSensors
+            .Where(s => s.SensorType == SensorType.Temperature
+                && (s.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                 || s.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                 || s.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                 || s.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                 || s.Name.Contains("CCD", StringComparison.OrdinalIgnoreCase)))
             .Select(s => s.Value)
             .Where(v => v.HasValue)
             .Select(v => (double)v!.Value)
             .ToList();
 
-        if (coreTemperatures.Any())
-        {
-            // Возвращаем максимальную температуру среди всех ядер
-            return coreTemperatures.Max();
-        }
+        if (coreTemps.Count > 0) return coreTemps.Max();
 
-        // Приоритет 2: Проверяем сенсоры материнской платы (часто используется ASUS)
-        var motherboardCpuTemp = GetPreferredSensorValue(
-            motherboardSensors,
-            SensorType.Temperature,
-            sensor => sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("Processor", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("CPUTIN", StringComparison.OrdinalIgnoreCase));
+        // 2. Материнская плата
+        var mbTemp = GetPreferredSensorValue(motherboardSensors, SensorType.Temperature,
+            s => s.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("Processor", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("CPUTIN", StringComparison.OrdinalIgnoreCase));
+        if (mbTemp is > 0) return mbTemp.Value;
 
-        if (motherboardCpuTemp.HasValue && motherboardCpuTemp.Value > 0)
-        {
-            return motherboardCpuTemp.Value;
-        }
+        // 3. Любые сенсоры CPU
+        var anyTemp = GetMaxSensorValue(cpuSensors, SensorType.Temperature);
+        if (anyTemp is > 0) return anyTemp.Value;
 
-        // Приоритет 3: Любые другие температурные сенсоры CPU
-        var anyCpuTemp = GetMaxSensorValue(cpuSensors, SensorType.Temperature);
-        if (anyCpuTemp.HasValue && anyCpuTemp.Value > 0)
-        {
-            return anyCpuTemp.Value;
-        }
+        // 4. Глобальный поиск
+        var globalTemp = GetPreferredSensorValue(allSensors, SensorType.Temperature,
+            s => s.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase));
+        if (globalTemp is > 0) return globalTemp.Value;
 
-        // Приоритет 4: Ищем по всем доступным сенсорам
-        var allSensorsTemp = GetPreferredSensorValue(
-            allSensors,
-            SensorType.Temperature,
-            sensor => sensor.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("Tdie", StringComparison.OrdinalIgnoreCase));
-        
-        if (allSensorsTemp.HasValue && allSensorsTemp.Value > 0)
-        {
-            return allSensorsTemp.Value;
-        }
-
-        // Приоритет 5: Fallback на WMI (Windows Management Instrumentation)
-        var wmiTemp = GetCpuTemperatureFromWmiCached();
-        if (wmiTemp > 0)
-        {
-            return wmiTemp;
-        }
-
-        return 0;
+        // 5. Счётчики производительности Windows (работают без прав администратора)
+        return TryReadPerfCounterThermalZone();
     }
 
-    private double GetCpuTemperatureFromWmiCached()
-    {
-        var nowUtc = DateTime.UtcNow;
-        if ((nowUtc - _lastWmiCpuTemperatureReadUtc) < WmiCpuTemperatureCacheDuration)
-        {
-            return _cachedWmiCpuTemperature;
-        }
-
-        _cachedWmiCpuTemperature = TryGetCpuTemperatureFromWmi();
-        _lastWmiCpuTemperatureReadUtc = nowUtc;
-
-        return _cachedWmiCpuTemperature;
-    }
-
-    private double TryGetCpuTemperatureFromWmi()
+    /// <summary>
+    /// Win32_PerfFormattedData_Counters_ThermalZoneInformation — ACPI thermal zone.
+    /// Доступен без прав администратора. HighPrecisionTemperature в деси-Кельвинах.
+    /// </summary>
+    private static double TryReadPerfCounterThermalZone()
     {
         double maxTemp = 0;
-        
+
         try
         {
-            // Пробуем получить температуру через WMI (работает на некоторых системах)
-            using var searcher = new ManagementObjectSearcher(@"root\WMI", "SELECT * FROM MSAcpi_ThermalZoneTemperature");
+            using var searcher = new ManagementObjectSearcher(
+                @"root\cimv2",
+                "SELECT HighPrecisionTemperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation");
+
             foreach (var obj in searcher.Get())
             {
-                var temp = obj["CurrentTemperature"];
-                if (temp != null)
-                {
-                    // WMI возвращает температуру в десятых долях Кельвина
-                    var kelvin = Convert.ToDouble(temp) / 10.0;
-                    var celsius = kelvin - 273.15;
-                    
-                    // Проверяем, что значение разумное (между 0 и 120°C)
-                    if (celsius > 0 && celsius < 120)
-                    {
-                        maxTemp = Math.Max(maxTemp, celsius);
-                    }
-                }
+                var raw = obj["HighPrecisionTemperature"];
+                if (raw is null) continue;
+
+                var celsius = Convert.ToDouble(raw) / 10.0 - 273.15;
+                if (celsius > 0 && celsius < 120)
+                    maxTemp = Math.Max(maxTemp, celsius);
             }
         }
         catch
         {
-            // WMI может не поддерживаться или требовать прав администратора
-        }
-
-        if (!_openHardwareMonitorWmiNamespaceUnavailable)
-        {
-            try
-            {
-                // Альтернативный способ через Open Hardware Monitor WMI
-                using var searcher = new ManagementObjectSearcher(@"root\OpenHardwareMonitor", 
-                    "SELECT * FROM Sensor WHERE SensorType='Temperature' AND Name LIKE '%CPU%'");
-
-                foreach (var obj in searcher.Get())
-                {
-                    var value = obj["Value"];
-                    if (value != null)
-                    {
-                        var temp = Convert.ToDouble(value);
-                        if (temp > 0 && temp < 120)
-                        {
-                            maxTemp = Math.Max(maxTemp, temp);
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // Если namespace/провайдер недоступен, больше не пытаемся каждый опрос.
-                _openHardwareMonitorWmiNamespaceUnavailable = true;
-            }
+            // Недоступен на данной системе
         }
 
         return maxTemp;
     }
 
-    private static double GetRamLoad(IEnumerable<ISensor> memorySensors)
-    {
-        return GetPreferredSensorValue(
-            memorySensors,
-            SensorType.Load,
-            sensor => sensor.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase))
-            ?? GetMaxSensorValue(memorySensors, SensorType.Load)
-            ?? 0;
-    }
-
-    private static double GetGpuLoad(IEnumerable<ISensor> gpuSensors)
-    {
-        return GetPreferredSensorValue(
-            gpuSensors,
-            SensorType.Load,
-            sensor => sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("D3D", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("GPU", StringComparison.OrdinalIgnoreCase))
-            ?? GetMaxSensorValue(gpuSensors, SensorType.Load)
-            ?? 0;
-    }
+    private static double GetGpuLoad(IEnumerable<ISensor> gpuSensors) =>
+        GetPreferredSensorValue(gpuSensors, SensorType.Load,
+            s => s.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("D3D", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("GPU", StringComparison.OrdinalIgnoreCase))
+        ?? GetMaxSensorValue(gpuSensors, SensorType.Load)
+        ?? 0;
 
     private static double GetGpuTemperature(IEnumerable<ISensor> gpuSensors, IEnumerable<ISensor> allSensors)
     {
-        var directGpuTemperature = GetPreferredSensorValue(
-                gpuSensors,
-                SensorType.Temperature,
-                sensor => sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                       || sensor.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
-                       || sensor.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase))
+        var direct = GetPreferredSensorValue(gpuSensors, SensorType.Temperature,
+                s => s.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                  || s.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
+                  || s.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase))
             ?? GetMaxSensorValue(gpuSensors, SensorType.Temperature)
             ?? 0;
 
-        if (directGpuTemperature > 0)
-        {
-            return directGpuTemperature;
-        }
+        if (direct > 0) return direct;
 
-        return GetPreferredSensorValue(
-            allSensors,
-            SensorType.Temperature,
-            sensor => sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
-                   || sensor.Name.Contains("GPU", StringComparison.OrdinalIgnoreCase))
+        return GetPreferredSensorValue(allSensors, SensorType.Temperature,
+            s => s.Name.Contains("Core", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
+              || s.Name.Contains("GPU", StringComparison.OrdinalIgnoreCase))
             ?? GetMaxSensorValue(allSensors, SensorType.Temperature)
             ?? 0;
     }
 
-    private static double? GetPreferredSensorValue(IEnumerable<ISensor> sensors, SensorType sensorType, Func<ISensor, bool> predicate)
-    {
-        return sensors
-            .Where(sensor => sensor.SensorType == sensorType)
-            .Where(predicate)
-            .Select(sensor => (double?)sensor.Value)
-            .FirstOrDefault(value => value.HasValue);
-    }
+    private static double? GetPreferredSensorValue(IEnumerable<ISensor> sensors, SensorType type, Func<ISensor, bool> predicate) =>
+        sensors.Where(s => s.SensorType == type).Where(predicate)
+               .Select(s => (double?)s.Value).FirstOrDefault(v => v.HasValue);
 
-    private static double? GetMaxSensorValue(IEnumerable<ISensor> sensors, SensorType sensorType)
-    {
-        return sensors
-            .Where(sensor => sensor.SensorType == sensorType)
-            .Select(sensor => (double?)sensor.Value)
-            .Where(value => value.HasValue)
-            .Select(value => value!.Value)
-            .DefaultIfEmpty()
-            .Max();
-    }
+    private static double? GetMaxSensorValue(IEnumerable<ISensor> sensors, SensorType type) =>
+        sensors.Where(s => s.SensorType == type)
+               .Select(s => (double?)s.Value).Where(v => v.HasValue)
+               .Select(v => v!.Value).DefaultIfEmpty().Max() is double d && d > 0 ? d : null;
 
-    private static double ClampToPercent(double value)
-    {
-        return Math.Clamp(value, 0, 100);
-    }
+    private static double ClampToPercent(double value) => Math.Clamp(value, 0, 100);
 }
