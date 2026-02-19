@@ -17,7 +17,6 @@ public partial class StartupStatusViewModel : ObservableObject
 
     public async Task RegisterAsync(IStartupRegistrationService registrationService, string? executablePath)
     {
-        // ARCH-03: путь передаётся снаружи — ViewModel не читает Process
         if (string.IsNullOrWhiteSpace(executablePath))
         {
             Status = "Автозапуск: нет пути";
@@ -31,7 +30,6 @@ public partial class StartupStatusViewModel : ObservableObject
             var registered = await registrationService.EnsureMachineWideAutostartAsync(executablePath);
             if (registered)
             {
-                // Успех — скрываем статус
                 IsVisible = Visibility.Collapsed;
             }
             else
@@ -43,7 +41,6 @@ public partial class StartupStatusViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            // CQ-09: включаем детали исключения для диагностики
             Status = "Автозапуск: ошибка";
             StatusDetails = $"Ошибка регистрации: {ex.GetType().Name}: {ex.Message}";
             IsVisible = Visibility.Visible;

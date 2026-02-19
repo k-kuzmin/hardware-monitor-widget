@@ -52,7 +52,6 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        // ARCH-03: путь к exe разрешается здесь, а не внутри StartupStatusViewModel
         var executablePath = Environment.ProcessPath;
         await StartupStatus.RegisterAsync(_startupRegistrationService, executablePath);
         _pollingTask = Task.Run(() => PollLoopAsync(_cts.Token));
@@ -100,10 +99,6 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// ARCH-06: если датчики выбрасывают исключение (напр. после сна/гибернации),
-    /// polling loop продолжает работу вместо молчаливого зависания.
-    /// </summary>
     private async Task TryRefreshTargetsSafeAsync(CancellationToken cancellationToken)
     {
         try

@@ -43,7 +43,6 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            // ARCH-01: async void — исключения должны перехватываться здесь, иначе WPF молча крашает процесс
             Debug.WriteLine($"[HardwareMonitor] Ошибка инициализации: {ex}");
             MessageBox.Show(
                 $"Ошибка запуска: {ex.Message}",
@@ -58,7 +57,6 @@ public partial class MainWindow : Window
     {
         _positionService.Save();
 
-        // CQ-07: самоотписка от собственных событий бессмысленна — удалена
         try
         {
             await _viewModel.DisposeAsync();

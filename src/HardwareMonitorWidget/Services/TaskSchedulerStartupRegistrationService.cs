@@ -15,7 +15,6 @@ public sealed class TaskSchedulerStartupRegistrationService : IStartupRegistrati
 
     private static async Task<bool> EnsureMachineWideAutostartAsyncCore(string executablePath, CancellationToken cancellationToken)
     {
-        // SEC-01: пути с кавычками ломают экранирование аргументов schtasks
         if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath) || executablePath.Contains('"'))
         {
             return false;
@@ -29,7 +28,6 @@ public sealed class TaskSchedulerStartupRegistrationService : IStartupRegistrati
             Arguments = arguments,
             CreateNoWindow = true,
             UseShellExecute = false
-            // SEC-02: stdout/stderr НЕ перенаправляем — непрочитанный буфер > 4 КБ вызывает deadlock
         };
 
         using var process = Process.Start(startInfo);

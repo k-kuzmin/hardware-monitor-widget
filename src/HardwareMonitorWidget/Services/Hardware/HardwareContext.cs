@@ -11,7 +11,6 @@ internal sealed class HardwareContext : IHardwareContext
     public IReadOnlyList<ISensor> CpuSensors        { get; }
     public IReadOnlyList<ISensor> MotherboardSensors { get; }
     public IReadOnlyList<ISensor> GpuSensors        { get; }
-    // PERF-03: lazy — строится один раз при первом обращении (не на каждый poll)
     private readonly Lazy<IReadOnlyList<ISensor>> _allSensors;
     public IReadOnlyList<ISensor> AllSensors        => _allSensors.Value;
     public IHardware?             SelectedGpu       { get; }

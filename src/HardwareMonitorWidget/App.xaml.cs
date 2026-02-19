@@ -16,7 +16,6 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // ARCH-07: глобальная сеть для неперехваченных исключений из async void и WPF-потока
         DispatcherUnhandledException += (_, args) =>
         {
             Debug.WriteLine($"[HardwareMonitor] Необработанное исключение: {args.Exception}");

@@ -17,7 +17,6 @@ internal sealed class CpuTempReader : IMetricReader, IDisposable
     public string Label => "Темп. ЦП";
     public string Unit  => "°C";
 
-    // PERF-01: кэшируем searcher — WMI COM-активация дорогая и не должна повторяться каждую секунду
     private ManagementObjectSearcher? _thermalSearcher;
 
     public void Dispose() => _thermalSearcher?.Dispose();
@@ -86,7 +85,6 @@ internal sealed class CpuTempReader : IMetricReader, IDisposable
         }
         catch (ManagementException ex)
         {
-            // WMI недоступен — нормальная ситуация на некоторых системах
             Debug.WriteLine($"[HardwareMonitor] ThermalZone WMI недоступен: {ex.ErrorCode}: {ex.Message}");
             _thermalSearcher?.Dispose();
             _thermalSearcher = null;
