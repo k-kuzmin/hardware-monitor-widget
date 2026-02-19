@@ -1,6 +1,7 @@
 # Build results
 [Bb]in/
 [Oo]bj/
+artifacts/
 
 # User-specific files
 *.rsuser
