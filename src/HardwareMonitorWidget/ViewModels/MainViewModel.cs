@@ -121,7 +121,8 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 
         for (var i = 0; i < MetricDefinition.All.Length; i++)
         {
-            SetNewTarget(i, MetricDefinition.All[i].Selector(snapshot));
+            var value = snapshot.Values.TryGetValue(MetricDefinition.All[i], out var v) ? v : 0d;
+            SetNewTarget(i, value);
         }
     }
 
