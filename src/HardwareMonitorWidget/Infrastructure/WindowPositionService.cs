@@ -8,12 +8,17 @@ using HardwareMonitorWidget.Infrastructure.Win32;
 
 namespace HardwareMonitorWidget.Infrastructure;
 
-internal sealed class WindowPositionService
+public sealed class WindowPositionService
 {
-    private static readonly string PositionFilePath = Path.Combine(
+    // SEC-01: базовый каталог фиксируется однажды — любой путь вне него отклоняется
+    private static readonly string BaseDirectory = Path.GetFullPath(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "HardwareMonitorWidget",
-        "window-position.json");
+        "HardwareMonitorWidget"));
+
+    private static readonly string PositionFilePath = Path.Combine(BaseDirectory, "window-position.json");
+
+    // SEC-01: разумный диапазон координат (±32 000 DIPs охватывает любые мониторы)
+    private const double MaxCoordinateValue = 32_000;
 
     private const double SnapThreshold = 16;
 
@@ -28,6 +33,13 @@ internal sealed class WindowPositionService
     {
         try
         {
+            // SEC-01: убеждаемся, что путь не выходит за пределы ожидаемого каталога
+            if (!PositionFilePath.StartsWith(BaseDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.WriteLine("[HardwareMonitor] Недопустимый путь к файлу позиции окна.");
+                return;
+            }
+
             var directory = Path.GetDirectoryName(PositionFilePath);
             if (!string.IsNullOrWhiteSpace(directory))
             {
@@ -54,9 +66,23 @@ internal sealed class WindowPositionService
             }
 
             var json = File.ReadAllText(PositionFilePath);
-            var state = JsonSerializer.Deserialize<WindowPositionState>(json);
-            if (state is null)
+            WindowPositionState? state;
+            try
             {
+                state = JsonSerializer.Deserialize<WindowPositionState>(json);
+            }
+            catch (JsonException ex)
+            {
+                Debug.WriteLine($"[HardwareMonitor] Файл позиции окна повреждён: {ex.Message}");
+                return;
+            }
+
+            // SEC-02: отклонять вредоносные или некорректные значения из файла
+            if (state is null
+                || !double.IsFinite(state.Left) || !double.IsFinite(state.Top)
+                || Math.Abs(state.Left) > MaxCoordinateValue || Math.Abs(state.Top) > MaxCoordinateValue)
+            {
+                Debug.WriteLine("[HardwareMonitor] Файл позиции окна содержит некорректные координаты.");
                 return;
             }
 
@@ -87,11 +113,15 @@ internal sealed class WindowPositionService
         var snappedLeft = _window.Left;
         var snappedTop = _window.Top;
 
+        // PERF-02: кэшируем правый и нижний края окна, чтобы не вычислять их дважды
+        var windowRight  = snappedLeft + width;
+        var windowBottom = snappedTop  + height;
+
         if (Math.Abs(snappedLeft - area.Left) <= SnapThreshold)
         {
             snappedLeft = area.Left;
         }
-        else if (Math.Abs((snappedLeft + width) - area.Right) <= SnapThreshold)
+        else if (Math.Abs(windowRight - area.Right) <= SnapThreshold)
         {
             snappedLeft = area.Right - width;
         }
@@ -100,7 +130,7 @@ internal sealed class WindowPositionService
         {
             snappedTop = area.Top;
         }
-        else if (Math.Abs((snappedTop + height) - area.Bottom) <= SnapThreshold)
+        else if (Math.Abs(windowBottom - area.Bottom) <= SnapThreshold)
         {
             snappedTop = area.Bottom - height;
         }

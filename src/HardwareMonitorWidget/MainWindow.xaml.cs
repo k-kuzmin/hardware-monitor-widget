@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -13,11 +14,13 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly WindowPositionService _positionService;
 
-    public MainWindow(MainViewModel viewModel)
+    public MainWindow(MainViewModel viewModel, Func<Window, WindowPositionService> positionServiceFactory)
     {
         InitializeComponent();
 
-        _positionService = new WindowPositionService(this);
+        // ARCH-01: сервис создаётся через фабрику, чтобы избежать
+        // циклической зависимости в DI-графе
+        _positionService = positionServiceFactory(this);
         _viewModel = viewModel;
         DataContext = _viewModel;
 
@@ -35,7 +38,12 @@ public partial class MainWindow : Window
     {
         // Установка окна позади всех остальных окон
         var hwnd = new WindowInteropHelper(this).Handle;
-        Win32Api.SetWindowPos(hwnd, Win32Api.HWND_BOTTOM, 0, 0, 0, 0, Win32Api.SWP_NOSIZE | Win32Api.SWP_NOMOVE | Win32Api.SWP_NOACTIVATE);
+        // SEC-03: проверяем результат P/Invoke и логируем ошибку при неудаче
+        if (!Win32Api.SetWindowPos(hwnd, Win32Api.HWND_BOTTOM, 0, 0, 0, 0, Win32Api.SWP_NOSIZE | Win32Api.SWP_NOMOVE | Win32Api.SWP_NOACTIVATE))
+        {
+            var error = Marshal.GetLastWin32Error();
+            Debug.WriteLine($"[HardwareMonitor] SetWindowPos завершился с ошибкой: Win32 код {error}");
+        }
 
         try
         {

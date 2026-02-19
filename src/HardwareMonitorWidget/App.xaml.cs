@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Windows;
+using HardwareMonitorWidget.Infrastructure;
 using HardwareMonitorWidget.Services;
 using HardwareMonitorWidget.Services.Hardware;
 using HardwareMonitorWidget.Services.Hardware.Readers;
@@ -46,6 +47,12 @@ public partial class App : Application
 
         services.AddSingleton<IHardwareMonitorService, LibreHardwareMonitorService>();
         services.AddSingleton<IStartupRegistrationService, TaskSchedulerStartupRegistrationService>();
+
+        // ARCH-01: фабрика WindowPositionService через Func<Window, WindowPositionService>
+        // разрывает циклическую зависимость MainWindow → WindowPositionService → Window
+        services.AddSingleton<Func<Window, WindowPositionService>>(
+            _ => window => new WindowPositionService(window));
+
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
     }
