@@ -22,14 +22,14 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
         _computer = CreateComputer();
     }
 
-    public HardwareSnapshot ReadSnapshot()
+    public Task<HardwareSnapshot> ReadSnapshotAsync(CancellationToken ct = default)
     {
-        _pollsSinceReinit++;
-        if (_pollsSinceReinit >= ReinitEveryNPolls)
-        {
-            _pollsSinceReinit = 0;
-            ReinitializeHardware();
-        }
+        return Task.Run(ReadSnapshotCore, ct);
+    }
+
+    private HardwareSnapshot ReadSnapshotCore()
+    {
+        ReinitializeIfNeeded();
 
         UpdateAllHardware();
 
@@ -99,6 +99,18 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
     {
         var memStatus = new MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>() };
         return GlobalMemoryStatusEx(ref memStatus) ? memStatus.dwMemoryLoad : 0;
+    }
+
+    private void ReinitializeIfNeeded()
+    {
+        _pollsSinceReinit++;
+        if (_pollsSinceReinit < ReinitEveryNPolls)
+        {
+            return;
+        }
+
+        _pollsSinceReinit = 0;
+        ReinitializeHardware();
     }
 
     private void ReinitializeHardware()
