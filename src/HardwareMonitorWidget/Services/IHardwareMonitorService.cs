@@ -4,5 +4,5 @@ namespace HardwareMonitorWidget.Services;
 
 public interface IHardwareMonitorService : IDisposable
 {
-    HardwareSnapshot ReadSnapshot();
+    Task<HardwareSnapshot> ReadSnapshotAsync(CancellationToken ct = default);
 }

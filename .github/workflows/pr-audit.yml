@@ -1,0 +1,156 @@
+name: Copilot Code Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'src/**/*.cs'
+      - 'src/**/*.xaml'
+      - 'src/**/*.csproj'
+
+permissions:
+  contents: read
+  pull-requests: write
+  models: read   # GitHub Models API
+
+jobs:
+  audit:
+    name: Security / Performance / Architecture Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Copilot Audit
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const MAX_DIFF_CHARS = 28_000;
+
+            // ── 1. Получить diff PR ────────────────────────────────────────────────
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+
+            const relevant = files.filter(f =>
+              /\.(cs|xaml|csproj)$/.test(f.filename) && f.patch
+            );
+
+            if (relevant.length === 0) {
+              core.info('Нет изменённых .cs/.xaml/.csproj файлов — аудит пропущен.');
+              return;
+            }
+
+            let diff = relevant
+              .map(f => `### ${f.filename}\n\`\`\`diff\n${f.patch}\n\`\`\``)
+              .join('\n\n');
+
+            if (diff.length > MAX_DIFF_CHARS) {
+              diff = diff.slice(0, MAX_DIFF_CHARS) + '\n\n... (diff усечён до 28 000 символов)';
+            }
+
+            // ── 2. Системный промпт ────────────────────────────────────────────────
+            const SYSTEM = `Ты — опытный senior .NET разработчик, специализирующийся на WPF, производительности и безопасности.
+            Проведи аудит предоставленного git-diff и составь структурированный отчёт на русском языке.
+
+            Формат ответа — строго Markdown со следующими разделами:
+
+            ## 🔒 Безопасность
+            Список уязвимостей: command injection, path traversal, утечки сенситивных данных, небезопасные вызовы P/Invoke и т.п.
+            Для каждой: **[CRITICAL/HIGH/MEDIUM/LOW]** — файл:строка — описание — рекомендация.
+            Если проблем нет, написать: _Уязвимостей не обнаружено._
+
+            ## ⚡ Производительность
+            Список проблем: ненужные аллокации, блокировка UI-потока, неоптимальные коллекции, отсутствие кэширования и т.п.
+            Для каждой: **[HIGH/MEDIUM/LOW]** — файл:строка — описание — рекомендация.
+            Если проблем нет, написать: _Проблем производительности не обнаружено._
+
+            ## 🏗️ Архитектура
+            Список нарушений: SOLID, SRP, DI, утечки абстракций, смешение слоёв, мёртвый код и т.п.
+            Для каждой: **[HIGH/MEDIUM/LOW]** — файл:строка — описание — рекомендация.
+            Если проблем нет, написать: _Архитектурных замечаний нет._
+
+            ## ✅ Итог
+            Краткое резюме (2–4 предложения): общее качество изменений, ключевые риски, рекомендация (approve / request changes).
+
+            Анализируй только изменения в diff (строки начинающиеся с +). Не давай общих советов, не относящихся к коду в diff.`;
+
+            // ── 3. Вызов GitHub Models API ────────────────────────────────────────
+            let reportBody;
+            try {
+              const resp = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.GH_TOKEN}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'gpt-4o',
+                  max_tokens: 2048,
+                  temperature: 0.2,
+                  messages: [
+                    { role: 'system', content: SYSTEM },
+                    { role: 'user',   content: `Проведи аудит следующего PR diff:\n\n${diff}` },
+                  ],
+                }),
+              });
+
+              if (!resp.ok) {
+                const text = await resp.text();
+                core.setFailed(`GitHub Models API вернул ${resp.status}: ${text}`);
+                return;
+              }
+
+              const json = await resp.json();
+              reportBody = json.choices?.[0]?.message?.content ?? '_(пустой ответ от модели)_';
+            } catch (err) {
+              core.setFailed(`Ошибка при вызове GitHub Models API: ${err.message}`);
+              return;
+            }
+
+            // ── 4. Найти и обновить/создать комментарий ───────────────────────────
+            const MARKER = '<!-- copilot-audit-report -->';
+            const header = [
+              MARKER,
+              `## 🤖 Copilot Audit Report`,
+              `> PR #${context.payload.pull_request.number} · ${relevant.length} файл(ов) проверено · ` +
+              `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+              '',
+            ].join('\n');
+
+            const fullComment = header + '\n' + reportBody;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            const existing = comments.find(c => c.body?.includes(MARKER));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                comment_id: existing.id,
+                body:       fullComment,
+              });
+              core.info(`Комментарий аудита обновлён (id ${existing.id}).`);
+            } else {
+              await github.rest.issues.createComment({
+                owner:       context.repo.owner,
+                repo:        context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body:        fullComment,
+              });
+              core.info('Комментарий аудита создан.');
+            }

@@ -15,7 +15,7 @@ public sealed class TaskSchedulerStartupRegistrationService : IStartupRegistrati
 
     private static async Task<bool> EnsureMachineWideAutostartAsyncCore(string executablePath, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath) || executablePath.Contains('"'))
         {
             return false;
         }
@@ -27,9 +27,7 @@ public sealed class TaskSchedulerStartupRegistrationService : IStartupRegistrati
             FileName = "schtasks",
             Arguments = arguments,
             CreateNoWindow = true,
-            UseShellExecute = false,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true
+            UseShellExecute = false
         };
 
         using var process = Process.Start(startInfo);

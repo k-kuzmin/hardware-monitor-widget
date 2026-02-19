@@ -1,0 +1,307 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'   # pre-release: v1.2.3-rc1
+
+permissions:
+  contents: write   # создание Release и загрузка артефактов
+  models: read      # GitHub Models API (генерация changelog)
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: 1
+  PROJECT: src/HardwareMonitorWidget/HardwareMonitorWidget.csproj
+  ARTIFACT_DIR: artifacts/release
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build & Publish (win-x64)
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # нужна полная история для changelog
+
+      - name: Определить версию из тега
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"           # например v1.2.3
+          $ver = $tag -replace '^v', ''             # 1.2.3
+          echo "value=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore HardwareMonitorWidget.sln
+
+      - name: Build (Release)
+        run: >
+          dotnet build HardwareMonitorWidget.sln
+          -c Release
+          -p:Version=${{ steps.version.outputs.value }}
+          --no-restore
+          -v minimal
+
+      # ── Framework-dependent (требует .NET 8 Runtime на машине) ───────────────
+      - name: Publish — framework-dependent
+        run: >
+          dotnet publish ${{ env.PROJECT }}
+          -c Release
+          -r win-x64
+          --self-contained false
+          -p:Version=${{ steps.version.outputs.value }}
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o ${{ env.ARTIFACT_DIR }}/framework-dependent
+          -v minimal
+
+      # ── Self-contained (автономный, .NET Runtime встроен) ────────────────────
+      - name: Publish — self-contained
+        run: >
+          dotnet publish ${{ env.PROJECT }}
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:Version=${{ steps.version.outputs.value }}
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o ${{ env.ARTIFACT_DIR }}/self-contained
+          -v minimal
+
+      # ── Упаковать в zip ───────────────────────────────────────────────────────
+      - name: Упаковать артефакты
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.value }}"
+          Compress-Archive `
+            -Path "${{ env.ARTIFACT_DIR }}/framework-dependent/*" `
+            -DestinationPath "${{ env.ARTIFACT_DIR }}/HardwareMonitorWidget-$ver-win-x64-framework-dependent.zip"
+          Compress-Archive `
+            -Path "${{ env.ARTIFACT_DIR }}/self-contained/*" `
+            -DestinationPath "${{ env.ARTIFACT_DIR }}/HardwareMonitorWidget-$ver-win-x64-self-contained.zip"
+
+      - name: Загрузить артефакты для следующего job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: ${{ env.ARTIFACT_DIR }}/*.zip
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Скачать артефакты
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/
+
+      - name: Сгенерировать changelog через Copilot
+        id: changelog
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ github.ref_name }}
+        with:
+          result-encoding: string
+          script: |
+            const currentTag = process.env.CURRENT_TAG;
+
+            // ── Найти предыдущий тег ──────────────────────────────────────────
+            const { execSync } = require('child_process');
+
+            let prevTag = '';
+            try {
+              prevTag = execSync(
+                `git describe --tags --abbrev=0 "${currentTag}^"`,
+                { encoding: 'utf8' }
+              ).trim();
+            } catch {
+              // Первый тег — берём все коммиты
+              prevTag = '';
+            }
+
+            const range = prevTag ? `${prevTag}..${currentTag}` : currentTag;
+
+            const rawLog = execSync(
+              `git log ${range} --pretty=format:"%h %s" --no-merges`,
+              { encoding: 'utf8' }
+            ).trim();
+
+            if (!rawLog) {
+              return '_Нет новых коммитов._';
+            }
+
+            core.info(`Коммиты для changelog (${range}):\n${rawLog}`);
+
+            // ── Вызов GitHub Models API ───────────────────────────────────────
+            const SYSTEM = `Ты — технический писатель. По списку git-коммитов составь changelog релиза на русском языке.
+
+            Формат — строго Markdown:
+
+            ### ✨ Новые возможности
+            - ...
+
+            ### 🛠️ Исправления и улучшения
+            - ...
+
+            ### ⚡ Производительность
+            - ...
+
+            ### 🔒 Безопасность
+            - ...
+
+            ### 🏗️ Рефакторинг / Архитектура
+            - ...
+
+            Правила:
+            - Показывай только разделы, в которых есть пункты.
+            - Каждый пункт — одно предложение на русском, понятное конечному пользователю или разработчику.
+            - Не дублируй хеш коммита и не используй технический жаргон без пояснения.
+            - Группируй похожие изменения в один пункт.`;
+
+            let changelog;
+            try {
+              const resp = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.GH_TOKEN}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'gpt-4o',
+                  max_tokens: 1024,
+                  temperature: 0.3,
+                  messages: [
+                    { role: 'system', content: SYSTEM },
+                    { role: 'user',   content: `Коммиты с ${prevTag || 'начала'} по ${currentTag}:\n\n${rawLog}` },
+                  ],
+                }),
+              });
+
+              if (resp.ok) {
+                const json = await resp.json();
+                changelog = json.choices?.[0]?.message?.content ?? '';
+              } else {
+                const text = await resp.text();
+                core.warning(`GitHub Models API: ${resp.status} — ${text}. Используется raw changelog.`);
+                changelog = '';
+              }
+            } catch (err) {
+              core.warning(`Ошибка GitHub Models API: ${err.message}. Используется raw changelog.`);
+              changelog = '';
+            }
+
+            // Fallback: форматированный git-лог
+            if (!changelog) {
+              changelog = rawLog
+                .split('\n')
+                .map(line => `- \`${line.slice(0,7)}\` ${line.slice(8)}`)
+                .join('\n');
+            }
+
+            // Добавить блок с raw-коммитами в <details>
+            const details = [
+              '',
+              '<details>',
+              `<summary>📋 Raw commits (${range})</summary>`,
+              '',
+              '```',
+              rawLog,
+              '```',
+              '</details>',
+            ].join('\n');
+
+            return changelog + details;
+
+      - name: Создать GitHub Release
+        uses: actions/github-script@v7
+        env:
+          CHANGELOG: ${{ steps.changelog.outputs.result }}
+          VERSION:   ${{ needs.build.outputs.version }}
+          TAG:       ${{ github.ref_name }}
+        with:
+          script: |
+            const fs   = require('fs');
+            const path = require('path');
+
+            const isPreRelease = process.env.TAG.includes('-');
+            const version      = process.env.VERSION;
+
+            const releaseBody = [
+              `## Hardware Monitor Widget ${process.env.TAG}`,
+              '',
+              '### 📦 Артефакты',
+              '',
+              `| Файл | Описание |`,
+              `|------|----------|`,
+              `| \`HardwareMonitorWidget-${version}-win-x64-framework-dependent.zip\` | Требует [.NET 8 Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) · меньший размер |`,
+              `| \`HardwareMonitorWidget-${version}-win-x64-self-contained.zip\` | Автономный (runtime встроен) · не требует установки |`,
+              '',
+              '> **Требования:** Windows 10/11 x64, права администратора (для LibreHardwareMonitor)',
+              '',
+              '---',
+              '',
+              '## 📝 Что изменилось',
+              '',
+              process.env.CHANGELOG,
+            ].join('\n');
+
+            // Создать Release
+            const { data: release } = await github.rest.repos.createRelease({
+              owner:               context.repo.owner,
+              repo:                context.repo.repo,
+              tag_name:            process.env.TAG,
+              name:                `Hardware Monitor Widget ${process.env.TAG}`,
+              body:                releaseBody,
+              draft:               false,
+              prerelease:          isPreRelease,
+              generate_release_notes: false,
+            });
+
+            core.info(`Release создан: ${release.html_url}`);
+
+            // Загрузить zip-файлы как Release assets
+            const distDir = 'dist';
+            const files   = fs.readdirSync(distDir).filter(f => f.endsWith('.zip'));
+
+            for (const file of files) {
+              const filePath = path.join(distDir, file);
+              const data     = fs.readFileSync(filePath);
+
+              await github.rest.repos.uploadReleaseAsset({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                release_id: release.id,
+                name:       file,
+                data:       data,
+                headers:    { 'content-type': 'application/zip' },
+              });
+
+              core.info(`Загружен: ${file}`);
+            }

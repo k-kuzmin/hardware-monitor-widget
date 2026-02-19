@@ -1,9 +1,9 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using System.Windows.Media;
 
-namespace HardwareMonitorWidget.Models;
+namespace HardwareMonitorWidget.ViewModels;
 
-public partial class MetricItem : ObservableObject
+public partial class MetricViewModel : ObservableObject
 {
     [ObservableProperty]
     private string _label;
@@ -20,21 +20,9 @@ public partial class MetricItem : ObservableObject
     [ObservableProperty]
     private Brush _textBrush = Brushes.LimeGreen;
 
-    public string DisplayValue => $"{Value:0} {Unit}";
-
-    public MetricItem(string label, string unit)
+    public MetricViewModel(string label, string unit)
     {
         _label = label;
         _unit = unit;
-    }
-
-    partial void OnValueChanged(double value)
-    {
-        OnPropertyChanged(nameof(DisplayValue));
-    }
-
-    partial void OnUnitChanged(string value)
-    {
-        OnPropertyChanged(nameof(DisplayValue));
     }
 }
