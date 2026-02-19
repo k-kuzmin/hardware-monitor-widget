@@ -27,8 +27,6 @@ internal sealed class HardwareContext : IHardwareContext
         CpuSensors         = GetSensors(cpu,         sensorMap);
         MotherboardSensors  = GetSensors(motherboard, sensorMap);
         GpuSensors         = GetSensors(SelectedGpu, sensorMap);
-        // PERF-01: вычисляем AllSensors сразу при построении контекста — Lazy не нужен,
-        // т.к. sensorMap уже готов и первое обращение происходит почти сразу
         AllSensors         = sensorMap.Values.SelectMany(s => s).ToList();
     }
 

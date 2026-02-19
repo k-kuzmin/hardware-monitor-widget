@@ -18,8 +18,6 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // ARCH-01: сервис создаётся через фабрику, чтобы избежать
-        // циклической зависимости в DI-графе
         _positionService = positionServiceFactory(this);
         _viewModel = viewModel;
         DataContext = _viewModel;
@@ -36,9 +34,7 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Установка окна позади всех остальных окон
         var hwnd = new WindowInteropHelper(this).Handle;
-        // SEC-03: проверяем результат P/Invoke и логируем ошибку при неудаче
         if (!Win32Api.SetWindowPos(hwnd, Win32Api.HWND_BOTTOM, 0, 0, 0, 0, Win32Api.SWP_NOSIZE | Win32Api.SWP_NOMOVE | Win32Api.SWP_NOACTIVATE))
         {
             var error = Marshal.GetLastWin32Error();

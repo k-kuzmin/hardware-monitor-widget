@@ -10,14 +10,12 @@ namespace HardwareMonitorWidget.Infrastructure;
 
 public sealed class WindowPositionService
 {
-    // SEC-01: базовый каталог фиксируется однажды — любой путь вне него отклоняется
     private static readonly string BaseDirectory = Path.GetFullPath(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "HardwareMonitorWidget"));
 
     private static readonly string PositionFilePath = Path.Combine(BaseDirectory, "window-position.json");
 
-    // SEC-01: разумный диапазон координат (±32 000 DIPs охватывает любые мониторы)
     private const double MaxCoordinateValue = 32_000;
 
     private const double SnapThreshold = 16;
@@ -33,7 +31,6 @@ public sealed class WindowPositionService
     {
         try
         {
-            // SEC-01: убеждаемся, что путь не выходит за пределы ожидаемого каталога
             if (!PositionFilePath.StartsWith(BaseDirectory, StringComparison.OrdinalIgnoreCase))
             {
                 Debug.WriteLine("[HardwareMonitor] Недопустимый путь к файлу позиции окна.");
@@ -77,7 +74,6 @@ public sealed class WindowPositionService
                 return;
             }
 
-            // SEC-02: отклонять вредоносные или некорректные значения из файла
             if (state is null
                 || !double.IsFinite(state.Left) || !double.IsFinite(state.Top)
                 || Math.Abs(state.Left) > MaxCoordinateValue || Math.Abs(state.Top) > MaxCoordinateValue)
@@ -113,7 +109,6 @@ public sealed class WindowPositionService
         var snappedLeft = _window.Left;
         var snappedTop = _window.Top;
 
-        // PERF-02: кэшируем правый и нижний края окна, чтобы не вычислять их дважды
         var windowRight  = snappedLeft + width;
         var windowBottom = snappedTop  + height;
 

@@ -48,8 +48,6 @@ public partial class App : Application
         services.AddSingleton<IHardwareMonitorService, LibreHardwareMonitorService>();
         services.AddSingleton<IStartupRegistrationService, TaskSchedulerStartupRegistrationService>();
 
-        // ARCH-01: фабрика WindowPositionService через Func<Window, WindowPositionService>
-        // разрывает циклическую зависимость MainWindow → WindowPositionService → Window
         services.AddSingleton<Func<Window, WindowPositionService>>(
             _ => window => new WindowPositionService(window));
 
