@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using LibreHardwareMonitor.Hardware;
 using System.Management;
+using LibreHardwareMonitor.Hardware;
 
 namespace HardwareMonitorWidget.Services.Hardware.Readers;
 
@@ -15,7 +15,7 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 internal sealed class CpuTempReader : IMetricReader, IDisposable
 {
     public string Label => "Темп. ЦП";
-    public string Unit  => "°C";
+    public string Unit => "°C";
 
     private ManagementObjectSearcher? _thermalSearcher;
 

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using HardwareMonitorWidget.Infrastructure.Win32;
 
 namespace HardwareMonitorWidget.Services.Hardware.Readers;
@@ -9,14 +10,14 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 internal sealed class RamLoadReader : IMetricReader
 {
     public string Label => "Загр. ОЗУ";
-    public string Unit  => "%";
+    public string Unit => "%";
 
     public double Read(IHardwareContext context) =>
         SensorHelper.Clamp(GetPhysicalMemoryLoad());
 
     private static double GetPhysicalMemoryLoad()
     {
-        var memStatus = new Win32Api.MemoryStatusEx { dwLength = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Win32Api.MemoryStatusEx>() };
+        var memStatus = new Win32Api.MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<Win32Api.MemoryStatusEx>() };
         return Win32Api.GlobalMemoryStatusEx(ref memStatus) ? memStatus.dwMemoryLoad : 0;
     }
 }

@@ -6,8 +6,8 @@ internal static class Win32Api
 {
     public static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
     public const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
-    public const uint SWP_NOSIZE   = 0x0001;
-    public const uint SWP_NOMOVE   = 0x0002;
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOACTIVATE = 0x0010;
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -23,8 +23,8 @@ internal static class Win32Api
     [StructLayout(LayoutKind.Sequential)]
     public struct MemoryStatusEx
     {
-        public uint  dwLength;
-        public uint  dwMemoryLoad;
+        public uint dwLength;
+        public uint dwMemoryLoad;
         public ulong ullTotalPhys;
         public ulong ullAvailPhys;
         public ulong ullTotalPageFile;

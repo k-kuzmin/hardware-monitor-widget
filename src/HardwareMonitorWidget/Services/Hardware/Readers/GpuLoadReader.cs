@@ -8,7 +8,7 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 internal sealed class GpuLoadReader : IMetricReader, IGpuNameReader
 {
     public string Label => "Загр. ГП";
-    public string Unit  => "%";
+    public string Unit => "%";
 
     public double Read(IHardwareContext context)
     {

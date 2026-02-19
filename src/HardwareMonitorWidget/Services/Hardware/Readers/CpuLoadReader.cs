@@ -5,7 +5,7 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 internal sealed class CpuLoadReader : IMetricReader
 {
     public string Label => "Загр. ЦП";
-    public string Unit  => "%";
+    public string Unit => "%";
 
     public double Read(IHardwareContext context)
     {

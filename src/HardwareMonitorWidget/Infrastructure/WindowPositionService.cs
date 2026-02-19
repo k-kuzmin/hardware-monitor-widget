@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -37,8 +38,9 @@ internal sealed class WindowPositionService
             var json = JsonSerializer.Serialize(state);
             File.WriteAllText(PositionFilePath, json);
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"[HardwareMonitor] Не удалось сохранить позицию окна: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -64,8 +66,9 @@ internal sealed class WindowPositionService
             _window.Left = clamped.Left;
             _window.Top = clamped.Top;
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"[HardwareMonitor] Не удалось восстановить позицию окна: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -154,10 +157,10 @@ internal sealed class WindowPositionService
             (rect.Bottom - rect.Top) / scaleY);
     }
 
-    private System.Windows.Media.Matrix GetTransformToDevice()
+    private Matrix GetTransformToDevice()
     {
         var source = PresentationSource.FromVisual(_window);
-        return source?.CompositionTarget?.TransformToDevice ?? System.Windows.Media.Matrix.Identity;
+        return source?.CompositionTarget?.TransformToDevice ?? Matrix.Identity;
     }
 
     private static double ClampToRange(double value, double min, double max)
