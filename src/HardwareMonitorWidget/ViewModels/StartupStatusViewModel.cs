@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using HardwareMonitorWidget.Services;
@@ -16,9 +15,9 @@ public partial class StartupStatusViewModel : ObservableObject
     [ObservableProperty]
     private Visibility _isVisible = Visibility.Collapsed;
 
-    public async Task RegisterAsync(IStartupRegistrationService registrationService)
+    public async Task RegisterAsync(IStartupRegistrationService registrationService, string? executablePath)
     {
-        var executablePath = Process.GetCurrentProcess().MainModule?.FileName;
+        // ARCH-03: путь передаётся снаружи — ViewModel не читает Process
         if (string.IsNullOrWhiteSpace(executablePath))
         {
             Status = "Автозапуск: нет пути";
@@ -42,10 +41,11 @@ public partial class StartupStatusViewModel : ObservableObject
                 IsVisible = Visibility.Visible;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            // CQ-09: включаем детали исключения для диагностики
             Status = "Автозапуск: ошибка";
-            StatusDetails = "Произошла ошибка при регистрации автозапуска.";
+            StatusDetails = $"Ошибка регистрации: {ex.GetType().Name}: {ex.Message}";
             IsVisible = Visibility.Visible;
         }
     }

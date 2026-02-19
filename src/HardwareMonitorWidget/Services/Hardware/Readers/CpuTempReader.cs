@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using LibreHardwareMonitor.Hardware;
 using System.Management;
 
@@ -11,10 +12,15 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 /// 4. LHM: глобальный поиск по всем сенсорам
 /// 5. Win32_PerfFormattedData_Counters_ThermalZoneInformation (без прав администратора)
 /// </summary>
-internal sealed class CpuTempReader : IMetricReader
+internal sealed class CpuTempReader : IMetricReader, IDisposable
 {
-    public string Label => "CPU Temp";
+    public string Label => "Темп. ЦП";
     public string Unit  => "°C";
+
+    // PERF-01: кэшируем searcher — WMI COM-активация дорогая и не должна повторяться каждую секунду
+    private ManagementObjectSearcher? _thermalSearcher;
+
+    public void Dispose() => _thermalSearcher?.Dispose();
 
     public double Read(IHardwareContext context)
     {
@@ -60,16 +66,16 @@ internal sealed class CpuTempReader : IMetricReader
     /// Win32_PerfFormattedData_Counters_ThermalZoneInformation — ACPI thermal zone.
     /// HighPrecisionTemperature в деси-Кельвинах (÷10 - 273.15).
     /// </summary>
-    private static double TryReadPerfCounterThermalZone()
+    private double TryReadPerfCounterThermalZone()
     {
         double maxTemp = 0;
         try
         {
-            using var searcher = new ManagementObjectSearcher(
+            _thermalSearcher ??= new ManagementObjectSearcher(
                 @"root\cimv2",
                 "SELECT HighPrecisionTemperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation");
 
-            foreach (var obj in searcher.Get())
+            foreach (var obj in _thermalSearcher.Get())
             {
                 var raw = obj["HighPrecisionTemperature"];
                 if (raw is null) continue;
@@ -78,7 +84,19 @@ internal sealed class CpuTempReader : IMetricReader
                     maxTemp = Math.Max(maxTemp, celsius);
             }
         }
-        catch { }
+        catch (ManagementException ex)
+        {
+            // WMI недоступен — нормальная ситуация на некоторых системах
+            Debug.WriteLine($"[HardwareMonitor] ThermalZone WMI недоступен: {ex.ErrorCode}: {ex.Message}");
+            _thermalSearcher?.Dispose();
+            _thermalSearcher = null;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[HardwareMonitor] ThermalZone ошибка: {ex.GetType().Name}: {ex.Message}");
+            _thermalSearcher?.Dispose();
+            _thermalSearcher = null;
+        }
 
         return maxTemp;
     }

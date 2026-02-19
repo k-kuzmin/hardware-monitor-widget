@@ -4,7 +4,7 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 
 internal sealed class GpuTempReader : IMetricReader
 {
-    public string Label => "GPU Temp";
+    public string Label => "Темп. ГП";
     public string Unit  => "°C";
 
     public double Read(IHardwareContext context)
@@ -18,10 +18,9 @@ internal sealed class GpuTempReader : IMetricReader
 
         if (direct > 0) return SensorHelper.Clamp(direct);
 
-        // Fallback — глобальный поиск
+        // Fallback — глобальный поиск (без "Core" — он совпадает с CPU-сенсорами)
         var global = SensorHelper.GetPreferred(context.AllSensors, SensorType.Temperature,
-                         s => s.Name.Contains("Core",     StringComparison.OrdinalIgnoreCase)
-                           || s.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
+                         s => s.Name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
                            || s.Name.Contains("GPU",      StringComparison.OrdinalIgnoreCase))
                      ?? SensorHelper.GetMax(context.AllSensors, SensorType.Temperature)
                      ?? 0;

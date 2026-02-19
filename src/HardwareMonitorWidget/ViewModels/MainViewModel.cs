@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -51,7 +52,9 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        await StartupStatus.RegisterAsync(_startupRegistrationService);
+        // ARCH-03: путь к exe разрешается здесь, а не внутри StartupStatusViewModel
+        var executablePath = Environment.ProcessPath;
+        await StartupStatus.RegisterAsync(_startupRegistrationService, executablePath);
         _pollingTask = Task.Run(() => PollLoopAsync(_cts.Token));
         _animationTask = Task.Run(() => AnimationLoopAsync(_cts.Token));
     }
@@ -88,12 +91,32 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task PollLoopAsync(CancellationToken cancellationToken)
     {
-        await RefreshTargetsAsync(cancellationToken);
+        await TryRefreshTargetsSafeAsync(cancellationToken);
 
         using var timer = new PeriodicTimer(PollInterval);
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
+            await TryRefreshTargetsSafeAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// ARCH-06: если датчики выбрасывают исключение (напр. после сна/гибернации),
+    /// polling loop продолжает работу вместо молчаливого зависания.
+    /// </summary>
+    private async Task TryRefreshTargetsSafeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
             await RefreshTargetsAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[HardwareMonitor] Ошибка опроса датчиков: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

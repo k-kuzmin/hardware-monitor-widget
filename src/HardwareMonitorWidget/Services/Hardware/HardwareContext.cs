@@ -11,7 +11,9 @@ internal sealed class HardwareContext : IHardwareContext
     public IReadOnlyList<ISensor> CpuSensors        { get; }
     public IReadOnlyList<ISensor> MotherboardSensors { get; }
     public IReadOnlyList<ISensor> GpuSensors        { get; }
-    public IReadOnlyList<ISensor> AllSensors        { get; }
+    // PERF-03: lazy — строится один раз при первом обращении (не на каждый poll)
+    private readonly Lazy<IReadOnlyList<ISensor>> _allSensors;
+    public IReadOnlyList<ISensor> AllSensors        => _allSensors.Value;
     public IHardware?             SelectedGpu       { get; }
 
     public HardwareContext(Computer computer)
@@ -23,11 +25,12 @@ internal sealed class HardwareContext : IHardwareContext
         var motherboard = allHardware.FirstOrDefault(h => h.HardwareType == HardwareType.Motherboard);
         var gpuCandidates = allHardware.Where(IsGpu).ToList();
 
-        SelectedGpu       = SelectGpu(gpuCandidates, sensorMap);
-        CpuSensors        = GetSensors(cpu,         sensorMap);
-        MotherboardSensors = GetSensors(motherboard, sensorMap);
-        GpuSensors        = GetSensors(SelectedGpu, sensorMap);
-        AllSensors        = sensorMap.Values.SelectMany(s => s).ToList();
+        SelectedGpu        = SelectGpu(gpuCandidates, sensorMap);
+        CpuSensors         = GetSensors(cpu,         sensorMap);
+        MotherboardSensors  = GetSensors(motherboard, sensorMap);
+        GpuSensors         = GetSensors(SelectedGpu, sensorMap);
+        _allSensors        = new Lazy<IReadOnlyList<ISensor>>(
+            () => sensorMap.Values.SelectMany(s => s).ToList());
     }
 
     // ── GPU selection ────────────────────────────────────────────────────────

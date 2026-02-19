@@ -43,7 +43,7 @@ public sealed class LibreHardwareMonitorService : IHardwareMonitorService
             .Select(r => r.Read(context))
             .ToArray();
 
-        var gpuName = _gpuNameReader?.ReadGpuName(context) ?? "ГПУ не обнаружен";
+        var gpuName = _gpuNameReader?.ReadGpuName(context) ?? "GPU не обнаружен";
         return new HardwareSnapshot(values, gpuName);
     }
 

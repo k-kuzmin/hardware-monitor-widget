@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.Diagnostics;
+using System.Windows;
 using HardwareMonitorWidget.Services;
 using HardwareMonitorWidget.Services.Hardware;
 using HardwareMonitorWidget.Services.Hardware.Readers;
@@ -14,6 +15,19 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // ARCH-07: глобальная сеть для неперехваченных исключений из async void и WPF-потока
+        DispatcherUnhandledException += (_, args) =>
+        {
+            Debug.WriteLine($"[HardwareMonitor] Необработанное исключение: {args.Exception}");
+            args.Handled = true;
+            MessageBox.Show(
+                $"Критическая ошибка: {args.Exception.Message}",
+                "Hardware Monitor Widget",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(1);
+        };
 
         var services = new ServiceCollection();
         ConfigureServices(services);

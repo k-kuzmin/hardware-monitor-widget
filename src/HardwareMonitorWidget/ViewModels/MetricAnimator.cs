@@ -10,10 +10,18 @@ namespace HardwareMonitorWidget.ViewModels;
 /// </summary>
 internal sealed class MetricAnimator
 {
-    private static readonly Brush[] BarBrushPalette = CreateBarBrushPalette();
+    private static readonly Brush[] BarBrushPalette  = CreateBarBrushPalette();
     private static readonly Brush[] TextBrushPalette = CreateTextBrushPalette();
 
     private static readonly TimeSpan AnimationDuration = TimeSpan.FromMilliseconds(700);
+
+    // Пороговые значения градиентной прогрессии (нормализованное значение 0–1)
+    private const double GreenToLimeThreshold  = 0.45;  // зелёный → лаймовый (< 45 %)
+    private const double LimeToYellowThreshold = 0.80;  // лаймовый → жёлтый  (< 80 %)
+    // Позиции остановок градиента внутри бара (0 = левый край, 1 = правый)
+    private const double LimeStopPointMedium   = 0.60;  // лайм на 60 % ширины бара (средний диапазон)
+    private const double GreenStopPointHigh    = 0.45;  // зелёный на 45 % (высокий диапазон)
+    private const double YellowStopPointHigh   = 0.72;  // жёлтый на 72 % (высокий диапазон)
 
     /// <summary>
     /// Применяет lerp-значения к метрикам и обновляет кисти.
@@ -93,13 +101,13 @@ internal sealed class MetricAnimator
         var yellow = Color.FromRgb(255, 200, 70);
         var red    = Color.FromRgb(255, 46,  79);
 
-        if (normalized < 0.45)
-            return LerpColor(green, lime, normalized / 0.45);
+        if (normalized < GreenToLimeThreshold)
+            return LerpColor(green, lime, normalized / GreenToLimeThreshold);
 
-        if (normalized < 0.8)
-            return LerpColor(lime, yellow, (normalized - 0.45) / 0.35);
+        if (normalized < LimeToYellowThreshold)
+            return LerpColor(lime, yellow, (normalized - GreenToLimeThreshold) / (LimeToYellowThreshold - GreenToLimeThreshold));
 
-        return LerpColor(yellow, red, (normalized - 0.8) / 0.2);
+        return LerpColor(yellow, red, (normalized - LimeToYellowThreshold) / (1.0 - LimeToYellowThreshold));
     }
 
     private static Color LerpColor(Color start, Color end, double t)
@@ -130,22 +138,22 @@ internal sealed class MetricAnimator
             EndPoint   = new Point(1, 0.5)
         };
 
-        if (normalized < 0.45)
+        if (normalized < GreenToLimeThreshold)
         {
             brush.GradientStops.Add(new GradientStop(green, 0));
             brush.GradientStops.Add(new GradientStop(lime,  1));
         }
-        else if (normalized < 0.8)
+        else if (normalized < LimeToYellowThreshold)
         {
             brush.GradientStops.Add(new GradientStop(green,  0));
-            brush.GradientStops.Add(new GradientStop(lime,   0.6));
+            brush.GradientStops.Add(new GradientStop(lime,   LimeStopPointMedium));
             brush.GradientStops.Add(new GradientStop(yellow, 1));
         }
         else
         {
             brush.GradientStops.Add(new GradientStop(green,  0));
-            brush.GradientStops.Add(new GradientStop(lime,   0.45));
-            brush.GradientStops.Add(new GradientStop(yellow, 0.72));
+            brush.GradientStops.Add(new GradientStop(lime,   GreenStopPointHigh));
+            brush.GradientStops.Add(new GradientStop(yellow, YellowStopPointHigh));
             brush.GradientStops.Add(new GradientStop(red,    1));
         }
 

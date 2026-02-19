@@ -19,6 +19,25 @@ internal static class Win32Api
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
+    // CQ-05: централизованный P/Invoke для памяти (RamLoadReader его использует)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MemoryStatusEx
+    {
+        public uint  dwLength;
+        public uint  dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT
     {

@@ -20,14 +20,9 @@ public partial class MetricViewModel : ObservableObject
     [ObservableProperty]
     private Brush _textBrush = Brushes.LimeGreen;
 
-    public string DisplayValue => $"{Value:0} {Unit}";
-
     public MetricViewModel(string label, string unit)
     {
         _label = label;
         _unit = unit;
     }
-
-    partial void OnValueChanged(double value) => OnPropertyChanged(nameof(DisplayValue));
-    partial void OnUnitChanged(string value)  => OnPropertyChanged(nameof(DisplayValue));
 }
