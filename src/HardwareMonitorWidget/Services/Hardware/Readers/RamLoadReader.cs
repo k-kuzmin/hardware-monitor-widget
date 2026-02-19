@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using HardwareMonitorWidget.Models;
 
 namespace HardwareMonitorWidget.Services.Hardware.Readers;
 
@@ -9,7 +8,8 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 /// </summary>
 internal sealed class RamLoadReader : IMetricReader
 {
-    public MetricDefinition Definition => MetricDefinition.RamLoad;
+    public string Label => "RAM Load";
+    public string Unit  => "%";
 
     public double Read(IHardwareContext context) =>
         SensorHelper.Clamp(GetPhysicalMemoryLoad());

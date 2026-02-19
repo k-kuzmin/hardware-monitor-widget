@@ -1,5 +1,4 @@
 using LibreHardwareMonitor.Hardware;
-using HardwareMonitorWidget.Models;
 
 namespace HardwareMonitorWidget.Services.Hardware.Readers;
 
@@ -8,7 +7,8 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 /// </summary>
 internal sealed class GpuLoadReader : IMetricReader, IGpuNameReader
 {
-    public MetricDefinition Definition => MetricDefinition.GpuLoad;
+    public string Label => "GPU Load";
+    public string Unit  => "%";
 
     public double Read(IHardwareContext context)
     {

@@ -1,6 +1,5 @@
 using LibreHardwareMonitor.Hardware;
 using System.Management;
-using HardwareMonitorWidget.Models;
 
 namespace HardwareMonitorWidget.Services.Hardware.Readers;
 
@@ -14,7 +13,8 @@ namespace HardwareMonitorWidget.Services.Hardware.Readers;
 /// </summary>
 internal sealed class CpuTempReader : IMetricReader
 {
-    public MetricDefinition Definition => MetricDefinition.CpuTemp;
+    public string Label => "CPU Temp";
+    public string Unit  => "°C";
 
     public double Read(IHardwareContext context)
     {

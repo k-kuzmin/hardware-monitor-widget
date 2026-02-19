@@ -3,9 +3,6 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using HardwareMonitorWidget.Infrastructure;
 using HardwareMonitorWidget.Infrastructure.Win32;
-using HardwareMonitorWidget.Services;
-using HardwareMonitorWidget.Services.Hardware;
-using HardwareMonitorWidget.Services.Hardware.Readers;
 using HardwareMonitorWidget.ViewModels;
 
 namespace HardwareMonitorWidget;
@@ -15,25 +12,12 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly WindowPositionService _positionService;
 
-    public MainWindow()
+    public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
 
         _positionService = new WindowPositionService(this);
-
-        var readers = new IMetricReader[]
-        {
-            new CpuLoadReader(),
-            new CpuTempReader(),
-            new GpuLoadReader(),
-            new GpuTempReader(),
-            new RamLoadReader(),
-        };
-
-        var hardwareMonitorService = new LibreHardwareMonitorService(readers);
-        var startupRegistrationService = new TaskSchedulerStartupRegistrationService();
-
-        _viewModel = new MainViewModel(hardwareMonitorService, startupRegistrationService);
+        _viewModel = viewModel;
         DataContext = _viewModel;
 
         SourceInitialized += OnSourceInitialized;

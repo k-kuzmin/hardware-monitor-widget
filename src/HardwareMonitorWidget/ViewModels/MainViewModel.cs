@@ -4,6 +4,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using HardwareMonitorWidget.Models;
 using HardwareMonitorWidget.Services;
+using HardwareMonitorWidget.Services.Hardware;
 
 namespace HardwareMonitorWidget.ViewModels;
 
@@ -31,13 +32,16 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public StartupStatusViewModel StartupStatus { get; } = new();
 
-    public MainViewModel(IHardwareMonitorService hardwareMonitorService, IStartupRegistrationService startupRegistrationService)
+    public MainViewModel(
+        IHardwareMonitorService hardwareMonitorService,
+        IStartupRegistrationService startupRegistrationService,
+        IEnumerable<IMetricReader> readers)
     {
         _hardwareMonitorService = hardwareMonitorService;
         _startupRegistrationService = startupRegistrationService;
 
         Metrics = new ObservableCollection<MetricViewModel>(
-            MetricDefinition.All.Select(d => new MetricViewModel(d.Label, d.Unit)));
+            readers.Select(r => new MetricViewModel(r.Label, r.Unit)));
 
         _currentValues = new double[Metrics.Count];
         _startValues = new double[Metrics.Count];
@@ -119,10 +123,9 @@ public partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         _animationStartUtc = DateTime.UtcNow;
 
-        for (var i = 0; i < MetricDefinition.All.Length; i++)
+        for (var i = 0; i < snapshot.Values.Count; i++)
         {
-            var value = snapshot.Values.TryGetValue(MetricDefinition.All[i], out var v) ? v : 0d;
-            SetNewTarget(i, value);
+            SetNewTarget(i, snapshot.Values[i]);
         }
     }
 

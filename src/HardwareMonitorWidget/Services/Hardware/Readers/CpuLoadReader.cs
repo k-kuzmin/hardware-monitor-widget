@@ -1,11 +1,11 @@
 using LibreHardwareMonitor.Hardware;
-using HardwareMonitorWidget.Models;
 
 namespace HardwareMonitorWidget.Services.Hardware.Readers;
 
 internal sealed class CpuLoadReader : IMetricReader
 {
-    public MetricDefinition Definition => MetricDefinition.CpuLoad;
+    public string Label => "CPU Load";
+    public string Unit  => "%";
 
     public double Read(IHardwareContext context)
     {

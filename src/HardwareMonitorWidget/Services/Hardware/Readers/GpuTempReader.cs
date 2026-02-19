@@ -1,11 +1,11 @@
 using LibreHardwareMonitor.Hardware;
-using HardwareMonitorWidget.Models;
 
 namespace HardwareMonitorWidget.Services.Hardware.Readers;
 
 internal sealed class GpuTempReader : IMetricReader
 {
-    public MetricDefinition Definition => MetricDefinition.GpuTemp;
+    public string Label => "GPU Temp";
+    public string Unit  => "°C";
 
     public double Read(IHardwareContext context)
     {
