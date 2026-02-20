@@ -44,9 +44,9 @@ dotnet run --project src/HardwareMonitorWidget/HardwareMonitorWidget.csproj
 
 ## Автозапуск
 
-При старте приложение пытается зарегистрировать machine-wide задачу в Task Scheduler:
+При старте приложение пытается зарегистрировать задачу автозапуска для текущего пользователя в Task Scheduler:
 
-- имя задачи: `HardwareMonitorWidget`
+- имя задачи: `HardwareMonitorWidget-<SID пользователя>`
 - триггер: `ONLOGON`
 - команда: запуск текущего `.exe`
 - уровень привилегий: `HIGHEST` (требуется для LibreHardwareMonitor)
