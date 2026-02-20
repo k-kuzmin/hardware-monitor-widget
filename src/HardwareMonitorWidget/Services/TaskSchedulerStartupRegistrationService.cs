@@ -7,8 +7,11 @@ namespace HardwareMonitorWidget.Services;
 public sealed class TaskSchedulerStartupRegistrationService : IStartupRegistrationService
 {
     private const string TaskNamePrefix = "HardwareMonitorWidget";
-    private const string LegacyTaskName = "HardwareMonitorWidget";
     private static readonly TimeSpan SchTasksTimeout = TimeSpan.FromSeconds(10);
+    private static readonly Lazy<string> CurrentUserSid = new(GetCurrentUserSid);
+    private static readonly SemaphoreSlim EnsureLock = new(1, 1);
+    private static string? _lastExecutablePath;
+    private static bool _lastEnsureSucceeded;
 
     public Task<bool> EnsureMachineWideAutostartAsync(string executablePath, CancellationToken cancellationToken = default)
     {
@@ -22,61 +25,89 @@ public sealed class TaskSchedulerStartupRegistrationService : IStartupRegistrati
             return false;
         }
 
-        var taskName = BuildTaskNameForCurrentUser();
-        if (string.IsNullOrWhiteSpace(taskName))
+        var fullExecutablePath = Path.GetFullPath(executablePath);
+
+        await EnsureLock.WaitAsync(cancellationToken);
+        try
         {
+            if (_lastEnsureSucceeded && string.Equals(_lastExecutablePath, fullExecutablePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var taskName = BuildTaskNameForCurrentUser();
+            if (string.IsNullOrWhiteSpace(taskName))
+            {
+                return false;
+            }
+
+            var created = await CreateOrUpdateStartupTaskAsync(taskName, fullExecutablePath, cancellationToken);
+            if (created)
+            {
+                _lastExecutablePath = fullExecutablePath;
+                _lastEnsureSucceeded = true;
+                return true;
+            }
+
+            _lastEnsureSucceeded = false;
             return false;
         }
-
-        var arguments = $"/Create /TN \"{taskName}\" /TR \"\\\"{executablePath}\\\"\" /SC ONLOGON /RL HIGHEST /F";
-
-        var created = await RunSchTasksAsync(arguments, cancellationToken);
-        if (!created)
+        finally
         {
-            return false;
+            EnsureLock.Release();
         }
-
-        if (!string.Equals(taskName, LegacyTaskName, StringComparison.OrdinalIgnoreCase))
-        {
-            await TryDeleteLegacyTaskAsync(cancellationToken);
-        }
-
-        return true;
     }
 
     private static string BuildTaskNameForCurrentUser()
     {
-        var identity = WindowsIdentity.GetCurrent();
-        var sid = identity.User?.Value;
+        var sid = CurrentUserSid.Value;
 
         if (!string.IsNullOrWhiteSpace(sid))
         {
             return $"{TaskNamePrefix}-{sid}";
         }
 
-        if (!string.IsNullOrWhiteSpace(identity.Name))
-        {
-            return $"{TaskNamePrefix}-{identity.Name.Replace('\\', '_')}";
-        }
-
         return string.Empty;
     }
 
-    private static async Task TryDeleteLegacyTaskAsync(CancellationToken cancellationToken)
+    private static string GetCurrentUserSid()
     {
-        var deleteArguments = $"/Delete /TN \"{LegacyTaskName}\" /F";
-        await RunSchTasksAsync(deleteArguments, cancellationToken);
+        using var identity = WindowsIdentity.GetCurrent();
+        return identity.User?.Value ?? string.Empty;
     }
 
-    private static async Task<bool> RunSchTasksAsync(string arguments, CancellationToken cancellationToken)
+    private static Task<bool> CreateOrUpdateStartupTaskAsync(string taskName, string executablePath, CancellationToken cancellationToken)
+    {
+        var taskRunCommand = $"\"{executablePath}\"";
+        return RunSchTasksAsync(
+            [
+                "/Create",
+                "/TN",
+                taskName,
+                "/TR",
+                taskRunCommand,
+                "/SC",
+                "ONLOGON",
+                "/RL",
+                "HIGHEST",
+                "/F"
+            ],
+            cancellationToken);
+    }
+
+    private static async Task<bool> RunSchTasksAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
         {
             FileName = "schtasks",
-            Arguments = arguments,
             CreateNoWindow = true,
             UseShellExecute = false
         };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
 
         using var process = Process.Start(startInfo);
         if (process is null)
